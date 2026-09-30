@@ -1,0 +1,205 @@
+// CIPHER WAR — data model
+// SQLite has no native enums, so enum-like columns are Strings with the
+// allowed values documented inline and validated by zod at the API edge.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────── Accounts ───────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  displayName  String
+  role         String   @default("PLAYER") // PLAYER | ADMIN
+  avatarSeed   String   @default("agent")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  hostedMatches Match[]       @relation("MatchHost")
+  wonMatches    Match[]       @relation("MatchWinner")
+  matchPlayers  MatchPlayer[]
+}
+
+// ───────────────────────── Engine-driven templates ──────────────────────
+// These are read by the live game engine at match start. Editing a row in
+// /admin changes how the next match actually plays.
+
+model AgencyTemplate {
+  id      String  @id @default(cuid())
+  code    String  @unique // NORD | EST | SUD | OUEST
+  name    String
+  country String
+  color   String
+  sigil   String
+  motto   String
+  active  Boolean @default(true)
+}
+
+model OperationTemplate {
+  id          String              @id @default(cuid())
+  name        String              @unique
+  description String
+  active      Boolean             @default(true)
+  directives  DirectiveTemplate[]
+}
+
+model DirectiveTemplate {
+  id          String            @id @default(cuid())
+  operation   OperationTemplate @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  operationId String
+  level       Int // 1..5
+  codename    String
+  dossierLine String
+  transitMs   Int
+  dispatchCost Int
+  crackPayout Int
+
+  @@unique([operationId, level])
+}
+
+model MinigameConfig {
+  id         String  @id @default(cuid())
+  key        String  @unique // cipher_type | frequency_lock | signal_trace
+  label      String
+  enabled    Boolean @default(true)
+  durationMs Int
+  silverAt   Int // raw score threshold for Silver (2 eliminations)
+  goldAt     Int // raw score threshold for Gold   (3 eliminations)
+  weight     Int     @default(1) // relative pick frequency
+
+  scores MinigameScore[]
+}
+
+// ──────────────────────────── Match records ─────────────────────────────
+
+model Match {
+  id         String    @id @default(cuid())
+  code       String    @unique // 6-char join code
+  status     String    @default("LOBBY") // LOBBY | ACTIVE | FINISHED | ABANDONED
+  host       User      @relation("MatchHost", fields: [hostId], references: [id])
+  hostId     String
+  winner     User?     @relation("MatchWinner", fields: [winnerId], references: [id])
+  winnerId   String?
+  winType    String? // OPERATION | BLACKOUT | TIMEOUT
+  createdAt  DateTime  @default(now())
+  startedAt  DateTime?
+  endedAt    DateTime?
+  durationMs Int?
+
+  players    MatchPlayer[]
+  messengers Messenger[]
+}
+
+model MatchPlayer {
+  id      String @id @default(cuid())
+  match   Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  matchId String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId  String
+
+  slot       Int // 0..3 — which quadrant
+  agencyCode String
+  operationName String @default("")
+
+  finalIntel          Int     @default(0)
+  directivesConfirmed Int     @default(0)
+  cracksMade          Int     @default(0)
+  timesCracked        Int     @default(0)
+  spiesRecruited      Int     @default(0)
+  encryptLevel        Int     @default(0)
+  decoysBaited        Int     @default(0)
+  placement           Int?
+  isWinner            Boolean @default(false)
+
+  messengers    Messenger[]    @relation("MessengerOwner")
+  cracked       Messenger[]    @relation("MessengerCracker")
+  crackAttempts CrackAttempt[]
+  purchases     Purchase[]
+  scores        MinigameScore[]
+
+  @@unique([matchId, userId])
+  @@unique([matchId, slot])
+}
+
+model Messenger {
+  id      String @id @default(cuid())
+  match   Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  matchId String
+
+  owner   MatchPlayer? @relation("MessengerOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  ownerId String?
+
+  kind           String // DIRECTIVE | DECOY | AMBIENT
+  level          Int      @default(0) // directive level 1..5, 0 for ambient/decoy
+  codename       String   @default("TRAFFIC")
+  candidateCount Int      @default(10)
+  realKeyIndex   Int
+  status         String   @default("IN_TRANSIT") // IN_TRANSIT | ARRIVED | CRACKED
+  dispatchedAt   DateTime @default(now())
+  arrivesAt      DateTime
+  resolvedAt     DateTime?
+
+  crackedBy   MatchPlayer? @relation("MessengerCracker", fields: [crackedById], references: [id])
+  crackedById String?
+
+  keys     KeyCandidate[]
+  attempts CrackAttempt[]
+}
+
+/// The literal "10 keys, 9 fake and 1 real" from the concept, stored as rows
+/// so the key space is inspectable and CRUD-able.
+model KeyCandidate {
+  id          String    @id @default(cuid())
+  messenger   Messenger @relation(fields: [messengerId], references: [id], onDelete: Cascade)
+  messengerId String
+  index       Int
+  glyph       String
+  isReal      Boolean   @default(false)
+
+  @@unique([messengerId, index])
+}
+
+model CrackAttempt {
+  id          String      @id @default(cuid())
+  messenger   Messenger   @relation(fields: [messengerId], references: [id], onDelete: Cascade)
+  messengerId String
+  player      MatchPlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  playerId    String
+
+  type           String // ELIMINATE | COMMIT
+  tier           String? // BRONZE | SILVER | GOLD
+  eliminated     Int     @default(0)
+  poolAfter      Int     @default(0)
+  committedIndex Int?
+  success        Boolean @default(false)
+  createdAt      DateTime @default(now())
+}
+
+model Purchase {
+  id        String      @id @default(cuid())
+  player    MatchPlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  playerId  String
+  item      String // SPY | ENCRYPT | ESCORT | DECOY | DISPATCH
+  cost      Int
+  createdAt DateTime    @default(now())
+}
+
+model MinigameScore {
+  id        String         @id @default(cuid())
+  player    MatchPlayer    @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  playerId  String
+  minigame  MinigameConfig @relation(fields: [minigameKey], references: [key], onDelete: Cascade)
+  minigameKey String
+  tier      String // BRONZE | SILVER | GOLD
+  rawScore  Int
+  createdAt DateTime       @default(now())
+}

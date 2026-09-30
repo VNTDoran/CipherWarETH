@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  background: #0e1420;
+  color: #eef2f7;
+  font-family: var(--font-display);
+  /* Grid + vignette: reads as a situation room without any image assets. */
+  background-image:
+    radial-gradient(ellipse at 50% 0%, rgba(92, 201, 252, 0.11), transparent 62%),
+    linear-gradient(rgba(148, 163, 184, 0.075) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.075) 1px, transparent 1px);
+  background-size: 100% 100%, 40px 40px, 40px 40px;
+}
+
+@layer components {
+  .panel {
+    @apply rounded-lg border border-white/20 bg-ink-800/85 backdrop-blur-sm;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2
+           font-mono text-xs uppercase tracking-widest transition
+           disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-primary {
+    @apply btn border-signal/60 bg-signal/20 text-signal
+           hover:enabled:border-signal hover:enabled:bg-signal/30;
+  }
+
+  .btn-ghost {
+    @apply btn border-white/25 text-slate-200 hover:enabled:border-white/50 hover:enabled:bg-white/10;
+  }
+
+  .btn-danger {
+    @apply btn border-alert/60 bg-alert/20 text-alert hover:enabled:bg-alert/30;
+  }
+
+  .field {
+    @apply w-full rounded-md border border-white/20 bg-ink-900/90 px-3 py-2
+           font-mono text-sm text-slate-50 outline-none
+           placeholder:text-slate-400 focus:border-signal/70;
+  }
+
+  .label {
+    @apply mb-1 block font-mono text-[10px] uppercase tracking-[0.2em] text-slate-300;
+  }
+
+  /* Small caps labels sit next to live numbers all match long — they need to
+     be legible, not merely present. */
+  .stat {
+    @apply font-mono text-[10px] uppercase tracking-[0.18em] text-slate-300;
+  }
+}
+
+/* Thin, unobtrusive scrollbars — the event log is read at a glance. */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Respect users who don't want motion; the game stays fully playable. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
