@@ -9,13 +9,15 @@
     "test": "hardhat test",
     "deploy": "hardhat run scripts/deploy.js --network localhost",
     "demo": "hardhat run scripts/demo-cheat.js --network localhost",
-    "serve": "http-server public -p 8080 -c-1"
+    "serve": "http-server public -p 8080 -c-1",
+    "simulate": "hardhat run scripts/simulate-match.js --network localhost"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "hardhat": "^2.22.0"
   },
   "dependencies": {
+    "@openzeppelin/contracts": "^5.6.1",
     "ethers": "^6.17.0",
     "http-server": "^14.1.1"
   }

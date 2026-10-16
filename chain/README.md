@@ -84,20 +84,60 @@ coûteux : mise remboursée aux joueurs si le délai expire.
 
 ---
 
-## 3. Les contrats
+## 3. Le carburant : le gaz devient une mécanique de jeu
+
+Un messager, dans Cipher War, *est* une transaction : il est émis, il voyage, il
+aboutit ou non. `CourierFuel` rend cette analogie littérale.
+
+Chaque messager part avec un petit budget de carburant — **3 unités, soit 15
+secondes** de trajet, pour un parcours qui en demande 30. Il tombe donc
+forcément en panne à mi-chemin. Un messager en panne **se fige dans l'éther** :
+toujours attaquable, mais il n'avance plus d'un mètre. Le seul moyen de le
+relancer est `boost()`, une vraie transaction signée depuis le portefeuille du
+propriétaire.
+
+```
+0.001 ETH = 1 unité = 5 secondes de trajet      (max 6 unités par transaction)
+```
+
+C'est exactement la tension recherchée : votre message est immobilisé, trois
+adversaires éliminent ses clés candidates, et le redémarrer coûte de la valeur
+réelle, maintenant. L'ETH collecté n'est pas brûlé — il s'accumule dans une
+**prime de match versée au vainqueur**, donc tout ce qui est dépensé pour sauver
+des messages grossit le lot que tout le monde se dispute.
+
+Le plafond par transaction est volontaire : sans lui, un joueur riche
+supprimerait toute la tension en une seule fois.
+
+## 4. Les contrats
 
 | Contrat | Rôle |
 | --- | --- |
 | `CommitRevealRegistry` | Cœur du système. `commitCourier`, `revealCourier` (rejette toute révélation non conforme), `computeCommitment`, `statusOf`, `isProven` |
+| `IntelToken` | ERC-20 `INTEL` (OpenZeppelin) — la monnaie du jeu comme jeton réel, visible dans MetaMask. Robinet public limité pour approvisionner les comptes de test |
+| `TournamentEscrow` | Séquestre ERC-20 : mise des joueurs, versement du pot au vainqueur, **remboursement si le serveur ne règle pas** |
+| `CourierFuel` | Carburant, boosters payés en ETH, prime de gaz du match |
 | `MatchRegistry` | Ancrage du résultat final et des totaux de carrière. Une écriture par match, pas par action |
 
-Les deux n'acceptent d'écriture que du `gameServer` fixé au déploiement
+Tous n'acceptent d'écriture que du `gameServer` fixé au déploiement
 (`immutable`), via un modificateur `onlyServer` — même motif que `onlyBuyer` /
-`onlyArbiter` dans l'`Escrow` du TP.
+`onlyArbiter` dans l'`Escrow` du TP. `TournamentEscrow` utilise `SafeERC20` et
+`ReentrancyGuard`.
+
+### Pourquoi le séquestre rend la preuve indispensable
+
+Tant que rien n'est misé, « faire confiance au serveur » reste tolérable. Dès
+qu'il y a de la valeur en jeu, ça ne l'est plus — et le remboursement rend le
+silence coûteux :
+
+- le serveur règle avant `settleDeadline` → le vainqueur touche le pot ;
+- il se tait → **chaque joueur récupère sa propre mise** et le serveur ne gagne
+  rien. Refuser de révéler cesse d'être une sortie gratuite d'une partie mal
+  engagée.
 
 ---
 
-## 4. Lancer (exactement comme le TP)
+## 5. Lancer (exactement comme le TP)
 
 Quatre terminaux, ou trois si vous ne lancez pas le jeu.
 
@@ -146,48 +186,79 @@ Puis ouvrir <http://127.0.0.1:8080> **dans Chrome avec MetaMask**.
 
 ---
 
-## 5. La démonstration (5 étapes)
+## 6. La démonstration
 
-Depuis la page, compte #0 connecté :
+La console (`public/index.html`) couvre tout le cycle. Elle détecte le compte
+connecté et grise ce qui ne lui est pas permis, donc la démonstration consiste à
+**changer de compte dans MetaMask** aux bons moments — ce qui montre au passage
+que les rôles sont appliqués par les contrats, pas par l'interface.
 
-1. **Envoyer un messager** → signez. Seule l'empreinte part on-chain ; l'index et
-   le nonce restent affichés localement, pour montrer qu'ils n'ont pas été
-   publiés.
-2. **Tricher : annoncer un autre index** → MetaMask soumet, le contrat **rejette**
-   avec `BadCommitment`. Le mensonge n'est même pas inscriptible.
-3. **Révéler honnêtement** → accepté, l'état passe à *Révélé et prouvé*.
-4. **Vérifier** → l'empreinte est recalculée côté navigateur et comparée à celle
-   stockée. Faites-le depuis le compte #1 pour montrer qu'aucun privilège n'est
-   requis.
+**Compte #0 (serveur)**
 
-Version console, sans MetaMask, pour répéter avant la soutenance :
+1. *Ouvrir le tournoi* — mise à 100 INTEL, table de 4.
+2. *Envoyer un messager* — deux transactions : `commitCourier` (l'empreinte) puis
+   `registerCourier` (3 unités de carburant). L'index réel s'affiche localement,
+   pour montrer qu'il n'a pas été publié.
+
+**Compte #1 (joueur, propriétaire du messager)**
+
+3. *Approuver* puis *Miser et rejoindre* — le double appel ERC-20. MetaMask
+   demande deux signatures : c'est le fonctionnement normal d'une allocation.
+4. Au bout de 15 s la barre passe au rouge : **EN PANNE**. Le messager est figé,
+   toujours attaquable. *Booster +1 unité* → transaction de 0.001 ETH, il repart.
+   La prime de gaz du match augmente d'autant.
+
+**Retour au compte #0**
+
+5. *Tricher : annoncer un autre index* → **rejeté** avec `BadCommitment`.
+   Le mensonge n'est pas inscriptible.
+6. *Révéler honnêtement* → accepté, statut *Révélé et prouvé*.
+7. *Verser le pot INTEL* puis *Verser la prime de gaz ETH* → le vainqueur
+   encaisse les deux. Les soldes se mettent à jour dans l'en-tête.
+
+Le journal en bas de page enregistre chaque transaction avec son gaz consommé.
+
+### Sans MetaMask, pour répéter
 
 ```bash
-npx hardhat run scripts/demo-cheat.js --network localhost
+npx hardhat run scripts/demo-cheat.js      --network localhost   # commit/reveal seul
+npx hardhat run scripts/simulate-match.js  --network localhost   # la partie entière
 ```
+
+`simulate-match.js` joue un match complet — mises, engagements, pannes, boosters,
+tentative de triche, révélations, règlement — et termine par un bilan des
+transactions et du gaz, réparti par signataire. Mesuré : **27 transactions,
+2 352 257 de gaz** pour 3 messagers et 4 joueurs.
 
 ---
 
-## 6. Où cela se branche dans le jeu
+## 7. Où cela se branche dans le jeu
 
-Deux points d'accroche dans `server/engine/match.ts` :
+Points d'accroche dans `server/engine/match.ts` et `server/rooms.ts` :
 
 | Moment | Code actuel | Ajout |
 | --- | --- | --- |
-| Création du messager | `spawnMessenger()` tire `realKeyIndex` | générer le nonce, calculer l'empreinte, `commitCourier`, n'exposer le messager qu'une fois la TX confirmée |
-| Résolution | `resolveCrack()` / `resolveArrival()` | `revealCourier(index, nonce)` |
-| Fin de match | `persistResult()` dans `server/rooms.ts` | `finalizeMatch(...)` |
+| Création du messager | `spawnMessenger()` tire `realKeyIndex` | générer le nonce, calculer l'empreinte, `commitCourier` + `registerCourier`, n'exposer le messager qu'une fois confirmé |
+| Chaque tick | `tick()` compare `now` à `arrivesAt` | consommer du carburant ; figer le messager quand il est épuisé |
+| Booster reçu | — | écouter l'événement `CourierBoosted` et relancer le messager |
+| Résolution | `resolveCrack()` / `resolveArrival()` | `revealCourier(index, nonce)` + `markLanded` |
+| Fin de match | `persistResult()` dans `server/rooms.ts` | `finalizeMatch`, `settle`, `payBounty` |
 
-Le jeu reste jouable sans chaîne : si les variables `CHAIN_*` sont absentes,
-l'intégration se désactive et le comportement est celui d'origine. Les adresses
-sont écrites par le déploiement dans `chain/chain.env`, à recopier dans le `.env`
-du jeu.
+**Changement de modèle à prévoir.** Aujourd'hui un messager a un `arrivesAt`
+fixe et le client interpole entre deux horodatages. Avec les pannes, la
+progression ne suit plus l'horloge murale : il faut suivre un `travelledMs` qui
+n'avance que tant qu'il reste du carburant, et transmettre l'état *figé / en vol*
+pour que le client cesse d'interpoler pendant une panne.
+
+Le jeu reste jouable sans chaîne : si `CHAIN_ENABLED` est absent, l'intégration
+se désactive et le comportement est celui d'origine. Les adresses sont écrites
+par le déploiement dans `chain/chain.env`, à recopier dans le `.env` du jeu.
 
 ---
 
-## 7. Coût et limites
+## 8. Coût et limites
 
-- **~2 transactions par messager** (engagement + révélation), soit 40 à 80 par
+- **~4 transactions par messager** (engagement, enregistrement, booster, révélation), soit 80 à 110 par
   partie. Gratuit sur un nœud local ou un testnet ; en production il faudrait
   regrouper les engagements par vague ou passer sur un L2.
 - **Le jeu ne peut pas vivre on-chain** : 10 mises à jour par seconde. Seuls les
