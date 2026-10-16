@@ -5,8 +5,8 @@
  *   node scripts/perf-probe.mjs <CODE> [username] [seconds]
  */
 import { io } from "socket.io-client";
+import { BASE } from "./base.mjs";
 
-const BASE = process.env.BASE ?? "http://localhost:3000";
 const [code, username = "admin", secsArg = "10"] = process.argv.slice(2);
 const SECONDS = Number(secsArg);
 

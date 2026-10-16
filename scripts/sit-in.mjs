@@ -5,8 +5,8 @@
  *   node scripts/sit-in.mjs <CODE> [username] [--play]
  */
 import { io } from "socket.io-client";
+import { BASE } from "./base.mjs";
 
-const BASE = process.env.BASE ?? "http://localhost:3000";
 const [code, username = "est", ...flags] = process.argv.slice(2);
 const play = flags.includes("--play");
 

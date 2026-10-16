@@ -4,8 +4,8 @@
  * Verifies the engine over the wire, not in isolation.
  */
 import { io } from "socket.io-client";
+import { BASE } from "./base.mjs";
 
-const BASE = process.env.BASE ?? "http://localhost:3000";
 const log = (...a) => console.log(...a);
 
 async function login(username) {

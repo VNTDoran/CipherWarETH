@@ -6,8 +6,8 @@
  * either lands or burns. Run against a live `npm run dev`.
  */
 import { io } from "socket.io-client";
+import { BASE } from "./base.mjs";
 
-const BASE = process.env.BASE ?? "http://localhost:3000";
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function login(username) {

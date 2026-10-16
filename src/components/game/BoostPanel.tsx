@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AGENCY_META } from "../../../shared/constants";
 import type { MatchView } from "../../../shared/types";
 import type { WalletState } from "@/lib/useWallet";
+import WalletCard from "./WalletCard";
 
 /**
  * Refuelling, from the player's own wallet.
@@ -43,35 +44,10 @@ export default function BoostPanel({
   const me = view.players.find((p) => p.slot === view.youSlot);
   const color = me ? AGENCY_META[me.agency].color : "#cbd5e1";
 
-  if (!wallet.available) {
-    return (
-      <div className="panel p-3">
-        <span className="stat">fuel</span>
-        <p className="mt-1 text-xs leading-relaxed text-slate-300">
-          No wallet detected. Install MetaMask to refuel your couriers — the match
-          stays playable without one.
-        </p>
-      </div>
-    );
-  }
-
+  // Same card as the lobby, so connecting looks identical wherever you do it.
   if (!wallet.address) {
     return (
-      <div className="panel p-3">
-        <span className="stat">fuel</span>
-        <p className="mb-2 mt-1 text-xs leading-relaxed text-slate-300">
-          Your couriers run dry mid-flight. Connect a wallet so you can restart
-          them.
-        </p>
-        <button
-          type="button"
-          className="btn-primary w-full py-2"
-          onClick={onConnect}
-          disabled={wallet.busy}
-        >
-          {wallet.busy ? "connecting…" : "connect wallet"}
-        </button>
-      </div>
+      <WalletCard chain={view.chain} wallet={wallet} onConnect={onConnect} compact />
     );
   }
 

@@ -36,7 +36,15 @@ export default function PlayClient({ code }: { code: string }) {
   }
 
   if (view.status === "LOBBY") {
-    return <LobbyRoom view={view} onReady={actions.ready} onStart={actions.start} />;
+    return (
+      <LobbyRoom
+        view={view}
+        wallet={wallet}
+        onConnectWallet={wallet.connect}
+        onReady={actions.ready}
+        onStart={actions.start}
+      />
+    );
   }
 
   return (

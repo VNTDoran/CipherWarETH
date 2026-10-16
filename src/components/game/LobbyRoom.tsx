@@ -4,13 +4,19 @@ import Link from "next/link";
 import { useState } from "react";
 import { AGENCY_META } from "../../../shared/constants";
 import type { MatchView } from "../../../shared/types";
+import type { WalletState } from "@/lib/useWallet";
+import WalletCard from "./WalletCard";
 
 export default function LobbyRoom({
   view,
+  wallet,
+  onConnectWallet,
   onReady,
   onStart,
 }: {
   view: MatchView;
+  wallet: WalletState;
+  onConnectWallet: () => void;
   onReady: (ready: boolean) => void;
   onStart: () => void;
 }) {
@@ -99,6 +105,12 @@ export default function LobbyRoom({
           );
         })}
       </div>
+
+      {view.chain && (
+        <div className="mt-4">
+          <WalletCard chain={view.chain} wallet={wallet} onConnect={onConnectWallet} />
+        </div>
+      )}
 
       <div className="mt-6 space-y-3">
         {isHost ? (

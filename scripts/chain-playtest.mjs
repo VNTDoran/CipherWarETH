@@ -10,8 +10,8 @@
  */
 import { io } from "socket.io-client";
 import { Contract, JsonRpcProvider, Wallet } from "ethers";
+import { BASE } from "./base.mjs";
 
-const BASE = process.env.BASE ?? "http://localhost:3100";
 const RPC = process.env.CHAIN_RPC_URL ?? "http://127.0.0.1:8545";
 
 // Hardhat accounts #1 and #2 — the players.

@@ -125,7 +125,15 @@ export default function GameBoard({
           </div>
         </div>
 
-        <div className="grid min-h-0 gap-2 lg:grid-rows-[minmax(0,1.15fr)_minmax(0,1fr)]">
+        <div className="grid min-h-0 gap-2 lg:grid-rows-[auto_minmax(0,1.15fr)_minmax(0,1fr)]">
+          {/* Always visible, never behind the log toggle: a stalled courier is
+              being attacked right now and the fix is one tap away. */}
+          <BoostPanel
+            view={view}
+            wallet={wallet}
+            onConnect={wallet.connect}
+            onBoost={wallet.boost}
+          />
           <KeyRack
             view={view}
             messenger={selected}
