@@ -218,6 +218,15 @@ function commitmentOf(matchId, courierId, keyIndex, nonce) {
   ));
 }
 
+/** The hidden fuel bill, derived from the secret preimage. Mirrors the contract. */
+function requiredUnitsOf(matchId, courierId, keyIndex, nonce) {
+  const h = BigInt(keccak256(solidityPacked(
+    ["string", "bytes32", "bytes32", "uint8", "bytes32"],
+    ["FUEL", matchId, courierId, keyIndex, nonce],
+  )));
+  return Number(4n + (h % 12n)); // MIN 4 .. MAX 15
+}
+
 // ───────────────────────────── connect ──────────────────────────────────
 
 async function connect() {
@@ -278,10 +287,13 @@ async function refreshAll() {
 
   if (current) {
     const c = await fuel.getCourier(MATCH_ID, current.courierId);
-    const secs = Number(await fuel.travelSecondsOf(MATCH_ID, current.courierId));
-    current.paidSeconds = secs;
+    current.paidUnits = Number(c.unitsAtDispatch) + Number(c.unitsBoosted);
+    current.required = Number(c.requiredUnits);
     current.landed = c.landed;
-    $("paidSecs").textContent = secs + " s";
+    const owed = Number(await fuel.unitsOutstanding(MATCH_ID, current.courierId));
+    $("paidSecs").textContent =
+      Number(await fuel.travelSecondsOf(MATCH_ID, current.courierId)) + " s"
+      + (owed > 0 ? ` · ${owed} unité(s) manquante(s)` : " · suffisant");
     $("boostCount").textContent = Number(c.boostCount);
     $("chainStatus").textContent = STATUS[Number(await registry.statusOf(MATCH_ID, current.courierId))];
     renderFlight();
@@ -322,21 +334,24 @@ function updateGating() {
 
 function renderFlight() {
   if (!current) return;
-  const elapsed = Math.floor((Date.now() - current.startedAt) / 1000);
-  const paid = current.paidSeconds ?? 0;
-  const needed = current.totalFlightSeconds;
-  const shown = Math.min(elapsed, paid);
-  const pct = Math.min(100, (shown / needed) * 100);
+  const paidUnits = current.paidUnits ?? 0;
+  const required = current.required ?? 1;
+  const owed = Math.max(0, required - paidUnits);
+  const pct = Math.min(100, (paidUnits / required) * 100);
 
-  $("elapsedSecs").textContent = shown + " s / " + needed + " s requis";
   $("flightBar").style.width = pct + "%";
 
+  // The server sees the bill; a player sees only that it is not yet paid.
+  $("elapsedSecs").textContent = role === "serveur"
+    ? `${paidUnits} / ${required} unités payées`
+    : (owed > 0 ? `${paidUnits} unités payées — facture inconnue` : "facture réglée");
+
   const card = $("courierCard");
-  if (current.landed || shown >= needed) {
+  if (current.landed) {
     $("flightTag").textContent = "arrivé";
     $("flightTag").className = "tag done";
     card.classList.remove("stalled");
-  } else if (elapsed >= paid) {
+  } else if (owed > 0) {
     $("flightTag").textContent = "EN PANNE — booster requis";
     $("flightTag").className = "tag stall";
     card.classList.add("stalled");
@@ -367,18 +382,19 @@ $("dispatch").onclick = async () => {
   const commitment = commitmentOf(MATCH_ID, courierId, keyIndex, nonce);
   const unitsAtDispatch = 3;
 
+  // Bill derived from the secret draw: the server knows it now, the player
+  // does not, and after the reveal anyone can check it was not inflated.
+  const required = requiredUnitsOf(MATCH_ID, courierId, keyIndex, nonce);
+
   const a = await send("commitCourier", () =>
     registry.commitCourier(MATCH_ID, courierId, commitment, CANDIDATES, 3600));
   if (!a) return;
-  const b = await send("registerCourier (3 unités)", () =>
-    fuel.registerCourier(MATCH_ID, courierId, owner, unitsAtDispatch));
+  const b = await send(`registerCourier (${unitsAtDispatch} au départ)`, () =>
+    fuel.registerCourier(MATCH_ID, courierId, owner, unitsAtDispatch, required));
   if (!b) return;
 
   current = {
-    courierId, keyIndex, nonce, commitment, owner,
-    startedAt: Date.now(),
-    paidSeconds: unitsAtDispatch * SECONDS_PER_UNIT,
-    totalFlightSeconds: 30, // a D1 courier needs ~30 s to reach its capital
+    courierId, keyIndex, nonce, commitment, owner, required,
     landed: false,
   };
   $("courierId").textContent = courierId;
@@ -387,10 +403,10 @@ $("dispatch").onclick = async () => {
   $("commitment").textContent = commitment;
 
   clearInterval(flightTimer);
-  flightTimer = setInterval(renderFlight, 250);
+  flightTimer = setInterval(renderFlight, 500);
 
   await refreshAll();
-  say("Messager parti avec 15 s de carburant pour un trajet de 30 s — il tombera en panne.", "ok");
+  say(`Messager parti avec ${unitsAtDispatch} unités. Sa facture réelle est de ${required} unités — il est déjà en panne.`, "ok");
 };
 
 const boost = (units) => send(`boost (+${units} unité${units > 1 ? "s" : ""})`, async () =>

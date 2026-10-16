@@ -31,10 +31,15 @@ contract CourierFuel is ReentrancyGuard {
     /// Cap per transaction, so a player cannot buy their way out of all tension.
     uint32 public constant MAX_UNITS_PER_BOOST = 6;
 
+    /// Range of the hidden fuel demand, in units.
+    uint32 public constant MIN_REQUIRED_UNITS = 4;
+    uint32 public constant MAX_REQUIRED_UNITS = 15;
+
     struct Courier {
         address owner;
         uint32 unitsAtDispatch;
         uint32 unitsBoosted;
+        uint32 requiredUnits; // hidden demand, checkable after the reveal
         uint32 boostCount;
         bool registered;
         bool landed;
@@ -51,7 +56,8 @@ contract CourierFuel is ReentrancyGuard {
         bytes32 indexed matchId,
         bytes32 indexed courierId,
         address indexed owner,
-        uint32 unitsAtDispatch
+        uint32 unitsAtDispatch,
+        uint32 requiredUnits
     );
     event CourierBoosted(
         bytes32 indexed matchId,
@@ -59,7 +65,8 @@ contract CourierFuel is ReentrancyGuard {
         address indexed payer,
         uint256 amount,
         uint32 unitsAdded,
-        uint32 totalUnits
+        uint32 totalUnits,
+        uint32 stillOwed
     );
     event CourierLanded(bytes32 indexed matchId, bytes32 indexed courierId);
     event BountyPaid(bytes32 indexed matchId, address indexed winner, uint256 amount);
@@ -74,6 +81,7 @@ contract CourierFuel is ReentrancyGuard {
     error BountyAlreadyPaid();
     error NothingToPay();
     error TransferFailed();
+    error BadRequirement();
 
     modifier onlyServer() {
         if (msg.sender != gameServer) revert NotGameServer();
@@ -93,26 +101,83 @@ contract CourierFuel is ReentrancyGuard {
 
     /// @notice Called by the server when a courier leaves, recording who may
     ///         refuel it and how far it can travel unaided.
+    /// @param requiredUnits Total fuel this courier will demand. The server
+    ///        derives it from the SECRET preimage via `deriveRequiredUnits`, so
+    ///        the player cannot predict it — they find out by paying until the
+    ///        courier moves again, exactly like discovering a transaction's real
+    ///        gas cost. It is published here only as a number, which reveals
+    ///        nothing about the key; after the reveal anyone can recompute it
+    ///        and confirm the server did not inflate the bill.
     function registerCourier(
         bytes32 matchId,
         bytes32 courierId,
         address owner,
-        uint32 unitsAtDispatch
+        uint32 unitsAtDispatch,
+        uint32 requiredUnits
     ) external onlyServer {
         bytes32 k = courierKey(matchId, courierId);
         if (_couriers[k].registered) revert AlreadyRegistered();
         if (owner == address(0)) revert NotCourierOwner();
+        if (requiredUnits < MIN_REQUIRED_UNITS || requiredUnits > MAX_REQUIRED_UNITS) {
+            revert BadRequirement();
+        }
 
         _couriers[k] = Courier({
             owner: owner,
             unitsAtDispatch: unitsAtDispatch,
             unitsBoosted: 0,
+            requiredUnits: requiredUnits,
             boostCount: 0,
             registered: true,
             landed: false
         });
 
-        emit CourierRegistered(matchId, courierId, owner, unitsAtDispatch);
+        emit CourierRegistered(matchId, courierId, owner, unitsAtDispatch, requiredUnits);
+    }
+
+    /// @notice The fuel demand implied by a courier's secret preimage.
+    /// @dev Pure and public: after `revealCourier` publishes the index and nonce,
+    ///      anyone recomputes this and compares it to the stored
+    ///      `requiredUnits`. A server that billed more than the draw dictated is
+    ///      caught the same way a server that swapped the key is caught.
+    function deriveRequiredUnits(
+        bytes32 matchId,
+        bytes32 courierId,
+        uint8 keyIndex,
+        bytes32 nonce
+    ) public pure returns (uint32) {
+        uint256 h = uint256(
+            keccak256(abi.encodePacked("FUEL", matchId, courierId, keyIndex, nonce))
+        );
+        uint32 span = MAX_REQUIRED_UNITS - MIN_REQUIRED_UNITS + 1;
+        return MIN_REQUIRED_UNITS + uint32(h % span);
+    }
+
+    /// @notice True if the fuel demanded matches what the revealed draw implies.
+    function fuelWasHonest(
+        bytes32 matchId,
+        bytes32 courierId,
+        uint8 keyIndex,
+        bytes32 nonce
+    ) external view returns (bool) {
+        Courier storage c = _couriers[courierKey(matchId, courierId)];
+        if (!c.registered) return false;
+        return c.requiredUnits == deriveRequiredUnits(matchId, courierId, keyIndex, nonce);
+    }
+
+    /// @notice Units still owed before the courier can complete its journey.
+    function unitsOutstanding(bytes32 matchId, bytes32 courierId) public view returns (uint32) {
+        Courier storage c = _couriers[courierKey(matchId, courierId)];
+        uint32 paid = c.unitsAtDispatch + c.unitsBoosted;
+        if (paid >= c.requiredUnits) return 0;
+        return c.requiredUnits - paid;
+    }
+
+    /// @notice True while the courier is frozen for want of fuel.
+    function isStalled(bytes32 matchId, bytes32 courierId) external view returns (bool) {
+        Courier storage c = _couriers[courierKey(matchId, courierId)];
+        if (!c.registered || c.landed) return false;
+        return unitsOutstanding(matchId, courierId) > 0;
     }
 
     // ─────────────────────────────── Boost ─────────────────────────────────
@@ -143,7 +208,8 @@ contract CourierFuel is ReentrancyGuard {
             msg.sender,
             msg.value,
             units,
-            c.unitsAtDispatch + c.unitsBoosted
+            c.unitsAtDispatch + c.unitsBoosted,
+            unitsOutstanding(matchId, courierId)
         );
     }
 

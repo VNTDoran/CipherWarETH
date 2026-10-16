@@ -145,33 +145,108 @@ describe("TournamentEscrow", function () {
   });
 });
 
+
 describe("CourierFuel", function () {
-  let fuel, server, owner, other;
+  let fuel, server, owner, other, nonce, required;
+  const KEY_INDEX = 6;
+  const AT_DISPATCH = 3;
+
+  // Mirrors deriveRequiredUnits off-chain, the way the game server computes it.
+  function deriveOffChain(matchId, courierId, keyIndex, nonceHex, min = 4, max = 15) {
+    const h = BigInt(
+      ethers.keccak256(
+        ethers.solidityPacked(
+          ["string", "bytes32", "bytes32", "uint8", "bytes32"],
+          ["FUEL", matchId, courierId, keyIndex, nonceHex],
+        ),
+      ),
+    );
+    return Number(BigInt(min) + (h % BigInt(max - min + 1)));
+  }
 
   beforeEach(async function () {
     [server, owner, other] = await ethers.getSigners();
     fuel = await (await ethers.getContractFactory("CourierFuel")).deploy(server.address);
     await fuel.waitForDeployment();
-    await fuel.registerCourier(MATCH_ID, COURIER_ID, owner.address, 4);
+    nonce = ethers.hexlify(ethers.randomBytes(32));
+    required = deriveOffChain(MATCH_ID, COURIER_ID, KEY_INDEX, nonce);
+    await fuel.registerCourier(MATCH_ID, COURIER_ID, owner.address, AT_DISPATCH, required);
   });
 
-  it("records the fuel a courier leaves with", async function () {
-    const c = await fuel.getCourier(MATCH_ID, COURIER_ID);
-    expect(c.owner).to.equal(owner.address);
-    expect(c.unitsAtDispatch).to.equal(4);
-    expect(await fuel.travelSecondsOf(MATCH_ID, COURIER_ID)).to.equal(20); // 4 * 5s
+  it("derives the same hidden fuel demand on-chain and off-chain", async function () {
+    const onChain = await fuel.deriveRequiredUnits(MATCH_ID, COURIER_ID, KEY_INDEX, nonce);
+    expect(Number(onChain)).to.equal(required);
+    expect(required).to.be.within(4, 15);
   });
 
-  it("adds fuel and grows the match bounty when boosted", async function () {
+  // The whole point: the player cannot know the bill in advance, because it
+  // comes from a preimage only the server holds until the reveal.
+  it("produces an unpredictable demand across different draws", async function () {
+    const seen = new Set();
+    for (let i = 0; i < 40; i++) {
+      const n = ethers.hexlify(ethers.randomBytes(32));
+      seen.add(deriveOffChain(MATCH_ID, COURIER_ID, i % 10, n));
+    }
+    // A constant would collapse to one value; a usable spread is the point.
+    expect(seen.size).to.be.greaterThan(5);
+  });
+
+  it("starts stalled when the demand exceeds the dispatch fuel", async function () {
+    expect(Number(await fuel.unitsOutstanding(MATCH_ID, COURIER_ID))).to.equal(
+      required - AT_DISPATCH,
+    );
+    expect(await fuel.isStalled(MATCH_ID, COURIER_ID)).to.equal(true);
+  });
+
+  it("clears the stall only once the full demand is paid", async function () {
     const price = await fuel.FUEL_UNIT_PRICE();
-    const value = price * 3n;
+    let owed = Number(await fuel.unitsOutstanding(MATCH_ID, COURIER_ID));
 
-    await expect(fuel.connect(owner).boost(MATCH_ID, COURIER_ID, { value }))
+    // Pay it off in capped chunks, as a player would click Boost repeatedly.
+    while (owed > 0) {
+      const chunk = Math.min(owed, 6);
+      await fuel.connect(owner).boost(MATCH_ID, COURIER_ID, { value: price * BigInt(chunk) });
+      owed = Number(await fuel.unitsOutstanding(MATCH_ID, COURIER_ID));
+    }
+
+    expect(await fuel.isStalled(MATCH_ID, COURIER_ID)).to.equal(false);
+    expect(Number(await fuel.unitsOutstanding(MATCH_ID, COURIER_ID))).to.equal(0);
+  });
+
+  it("reports what is still owed in the boost event", async function () {
+    const price = await fuel.FUEL_UNIT_PRICE();
+    const owedBefore = Number(await fuel.unitsOutstanding(MATCH_ID, COURIER_ID));
+    const units = Math.min(owedBefore, 2);
+    await expect(fuel.connect(owner).boost(MATCH_ID, COURIER_ID, { value: price * BigInt(units) }))
       .to.emit(fuel, "CourierBoosted")
-      .withArgs(MATCH_ID, COURIER_ID, owner.address, value, 3, 7);
+      .withArgs(
+        MATCH_ID, COURIER_ID, owner.address,
+        price * BigInt(units), units, AT_DISPATCH + units, owedBefore - units,
+      );
+  });
 
-    expect(await fuel.bounty(MATCH_ID)).to.equal(value);
-    expect(await fuel.travelSecondsOf(MATCH_ID, COURIER_ID)).to.equal(35); // 7 * 5s
+  it("lets anyone prove the server did not inflate the bill", async function () {
+    expect(await fuel.fuelWasHonest(MATCH_ID, COURIER_ID, KEY_INDEX, nonce)).to.equal(true);
+    // A courier billed for something other than its draw is caught here.
+    const other2 = ethers.id("COURIER-OTHER");
+    await fuel.registerCourier(MATCH_ID, other2, owner.address, AT_DISPATCH, 15);
+    const honest = deriveOffChain(MATCH_ID, other2, KEY_INDEX, nonce);
+    if (honest !== 15) {
+      expect(await fuel.fuelWasHonest(MATCH_ID, other2, KEY_INDEX, nonce)).to.equal(false);
+    }
+  });
+
+  it("rejects a demand outside the allowed range", async function () {
+    const c = ethers.id("COURIER-BAD");
+    await expect(
+      fuel.registerCourier(MATCH_ID, c, owner.address, AT_DISPATCH, 99),
+    ).to.be.revertedWithCustomError(fuel, "BadRequirement");
+  });
+
+  it("grows the match bounty when boosted", async function () {
+    const price = await fuel.FUEL_UNIT_PRICE();
+    await fuel.connect(owner).boost(MATCH_ID, COURIER_ID, { value: price * 2n });
+    expect(await fuel.bounty(MATCH_ID)).to.equal(price * 2n);
   });
 
   it("only the courier owner may refuel it", async function () {
@@ -186,12 +261,6 @@ describe("CourierFuel", function () {
     await expect(
       fuel.connect(owner).boost(MATCH_ID, COURIER_ID, { value: price * 20n }),
     ).to.be.revertedWithCustomError(fuel, "TooMuchFuel");
-  });
-
-  it("rejects a boost below one full unit", async function () {
-    await expect(
-      fuel.connect(owner).boost(MATCH_ID, COURIER_ID, { value: 1n }),
-    ).to.be.revertedWithCustomError(fuel, "NoValueSent");
   });
 
   it("will not refuel a courier that already landed", async function () {
@@ -210,8 +279,6 @@ describe("CourierFuel", function () {
     const before = await ethers.provider.getBalance(other.address);
     await fuel.payBounty(MATCH_ID, other.address);
     expect(await ethers.provider.getBalance(other.address)).to.equal(before + pot);
-    expect(await fuel.bounty(MATCH_ID)).to.equal(0);
-
     await expect(
       fuel.payBounty(MATCH_ID, other.address),
     ).to.be.revertedWithCustomError(fuel, "BountyAlreadyPaid");

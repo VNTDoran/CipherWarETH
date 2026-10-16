@@ -42,6 +42,23 @@ function commitmentOf(matchId, courierId, keyIndex, nonce) {
   );
 }
 
+/**
+ * The hidden fuel bill, derived from the SECRET preimage. The server can work
+ * it out at dispatch; the player cannot, because it depends on a nonce they
+ * will not see until the reveal. Mirrors CourierFuel.deriveRequiredUnits.
+ */
+function requiredUnitsOf(matchId, courierId, keyIndex, nonce, min = 4, max = 15) {
+  const h = BigInt(
+    ethers.keccak256(
+      ethers.solidityPacked(
+        ["string", "bytes32", "bytes32", "uint8", "bytes32"],
+        ["FUEL", matchId, courierId, keyIndex, nonce],
+      ),
+    ),
+  );
+  return Number(BigInt(min) + (h % BigInt(max - min + 1)));
+}
+
 const fmt = (wei) => ethers.formatEther(wei);
 
 async function main() {
@@ -90,22 +107,36 @@ async function main() {
     const nonce = ethers.hexlify(ethers.randomBytes(32));
     secrets.push({ courierId, keyIndex, nonce, owner, name: names[i] });
 
+    const required = requiredUnitsOf(matchId, courierId, keyIndex, nonce);
+
     console.log(`  — Messager ${i + 1} (${names[i]}), clé réelle ${keyIndex} gardée secrète`);
     await tx(
       "commitCourier",
       "serveur",
       registry.commitCourier(matchId, courierId, commitmentOf(matchId, courierId, keyIndex, nonce), CANDIDATES, 3600),
     );
-    await tx("registerCourier (3 unités)", "serveur", fuel.registerCourier(matchId, courierId, owner.address, FUEL_AT_DISPATCH));
+    await tx(
+      `registerCourier (${FUEL_AT_DISPATCH} au départ)`,
+      "serveur",
+      fuel.registerCourier(matchId, courierId, owner.address, FUEL_AT_DISPATCH, required),
+    );
+    console.log(`    ↳ facture cachée : ${required} unités — ${names[i]} l'ignore`);
 
-    // The courier runs dry mid-flight and freezes. Only the owner's own
-    // wallet can restart it.
-    const units = 1 + (i % 2); // 1 or 2 units
-    const value = await fuel.quote(units);
-    console.log(`    ↳ panne sèche à 15 s — ${names[i]} envoie un booster (${fmt(value)} ETH)`);
-    await tx(`boost (+${units} unités)`, names[i], fuel.connect(owner).boost(matchId, courierId, { value }));
-    const secs = await fuel.travelSecondsOf(matchId, courierId);
-    console.log(`    ↳ reparti : ${secs} s de trajet payées au total\n`);
+    // The courier freezes and stays frozen until the full bill is paid. The
+    // player pays blind, in capped chunks, discovering the cost as they go.
+    let owed = Number(await fuel.unitsOutstanding(matchId, courierId));
+    let spent = 0n;
+    let clicks = 0;
+    while (owed > 0) {
+      const chunk = Math.min(owed, 6);
+      const value = await fuel.quote(chunk);
+      await tx(`boost (+${chunk})`, names[i], fuel.connect(owner).boost(matchId, courierId, { value }));
+      spent += value;
+      clicks++;
+      owed = Number(await fuel.unitsOutstanding(matchId, courierId));
+      console.log(`    ↳ booster ${clicks} : ${fmt(value)} ETH, reste ${owed} unité(s)`);
+    }
+    console.log(`    ↳ reparti après ${clicks} booster(s), ${fmt(spent)} ETH dépensés\n`);
   }
 
   // ── 3. A cheating reveal is refused ────────────────────────────────────
