@@ -118,3 +118,20 @@ export function dispatchCost(level: number, burnedBefore: boolean): number {
   const base = DIRECTIVES[level - 1]?.dispatchCost ?? 0;
   return burnedBefore ? Math.round(base * REDISPATCH_RATIO) : base;
 }
+
+// ──────────────────────── Courier fuel (chain mode) ─────────────────────
+// Only active when CHAIN_ENABLED is set. Without it a courier carries enough
+// fuel for its whole trip and never stalls, so the original game is unchanged.
+
+/** Seconds of travel bought by one fuel unit. Mirrors CourierFuel.sol. */
+export const FUEL_SECONDS_PER_UNIT = 5;
+
+/** Units a courier leaves with, before any booster. */
+export const FUEL_UNITS_AT_DISPATCH = 3;
+
+/** Hidden demand range, derived from the courier's secret preimage. */
+export const FUEL_MIN_REQUIRED_UNITS = 4;
+export const FUEL_MAX_REQUIRED_UNITS = 15;
+
+/** Price of one unit in wei, as a decimal string (0.001 ETH). */
+export const FUEL_UNIT_PRICE_WEI = "1000000000000000";

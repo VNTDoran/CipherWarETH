@@ -9,7 +9,15 @@
 
 import { createServer } from "node:http";
 import { parse } from "node:url";
+// @next/env is CommonJS, so the named export does not survive ESM interop.
+import nextEnv from "@next/env";
 import next from "next";
+
+// This file runs under tsx, before Next boots, so nothing has read .env yet —
+// without this the CHAIN_* variables are simply absent and the chain silently
+// stays off. Uses Next's own loader so .env/.env.local resolve identically on
+// both sides of the process.
+nextEnv.loadEnvConfig(process.cwd(), process.env.NODE_ENV !== "production");
 import { Server as IOServer, type Socket } from "socket.io";
 import { BROADCAST_MS, TICK_MS } from "../shared/constants.js";
 import type {
@@ -19,6 +27,7 @@ import type {
   ShopItem,
 } from "../shared/types.js";
 import { SESSION_COOKIE, readToken } from "../src/lib/auth.js";
+import { chain } from "./chain/client.js";
 import type { Match } from "./engine/match.js";
 import {
   createMatch,
@@ -54,6 +63,7 @@ function parseCookies(header: string | undefined): Record<string, string> {
 }
 
 await app.prepare();
+await chain.init();
 
 const server = createServer((req, res) => {
   handle(req, res, parse(req.url ?? "/", true));
@@ -214,6 +224,14 @@ io.on("connection", (socket: Socket) => {
     broadcast(match);
   });
 
+  socket.on("linkWallet", (p: { address: string | null }) => {
+    const match = data.code ? getMatch(data.code) : undefined;
+    if (!match) return;
+    const addr = typeof p?.address === "string" ? p.address : null;
+    match.setWallet(data.userId, addr);
+    broadcast(match);
+  });
+
   socket.on("leave", () => {
     const match = data.code ? getMatch(data.code) : undefined;
     if (!match) return;
@@ -234,6 +252,16 @@ io.on("connection", (socket: Socket) => {
     }
     broadcast(match);
   });
+});
+
+// A booster is only credited once the money has actually moved, so the signal
+// comes from the contract event rather than from the player's client.
+chain.onBoost((e) => {
+  for (const match of listMatches()) {
+    if (match.matchIdHex?.toLowerCase() !== e.matchIdHex) continue;
+    if (match.applyBoost(e.courierIdHex, e.totalUnits)) broadcast(match);
+    break;
+  }
 });
 
 // ─────────────────────────────── Game loop ───────────────────────────────

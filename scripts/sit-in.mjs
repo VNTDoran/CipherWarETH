@@ -6,7 +6,7 @@
  */
 import { io } from "socket.io-client";
 
-const BASE = "http://localhost:3000";
+const BASE = process.env.BASE ?? "http://localhost:3000";
 const [code, username = "est", ...flags] = process.argv.slice(2);
 const play = flags.includes("--play");
 

@@ -6,7 +6,7 @@
  */
 import { io } from "socket.io-client";
 
-const BASE = "http://localhost:3000";
+const BASE = process.env.BASE ?? "http://localhost:3000";
 const [code, username = "admin", secsArg = "10"] = process.argv.slice(2);
 const SECONDS = Number(secsArg);
 

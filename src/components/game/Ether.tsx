@@ -183,13 +183,16 @@ export default function Ether({
         {/* Couriers */}
         {view.messengers.map((m) => {
           const r = routeFor(m);
-          const span = Math.max(1, m.arrivesAt - m.dispatchedAt);
-          const t = Math.min(1, Math.max(0, (now - m.dispatchedAt) / span));
+          // Interpolate forward from the server's progress only while moving.
+          // A stalled courier must sit exactly still, or the map would lie
+          // about where it is.
+          const drift = m.stalled ? 0 : (now - view.now) / Math.max(1, m.transitMs);
+          const t = Math.min(1, Math.max(0, m.progress + drift));
           const [x, y] = pointAt(r, t);
           const color = colorOf(m.ownerSlot);
           const mine = m.ownerSlot === view.youSlot;
           const selected = m.id === selectedId;
-          const urgent = m.arrivesAt - now < 8000;
+          const urgent = !m.stalled && m.arrivesAt - now < 8000;
           const size = m.kind === "AMBIENT" ? 1.5 : 2.2;
 
           return (
@@ -216,6 +219,14 @@ export default function Ether({
               )}
               {m.me.engaged && !m.me.committed && (
                 <circle cx={x} cy={y} r={size + 1.4} fill="none" stroke="#fbbf24" strokeOpacity="0.5" strokeWidth="0.3" />
+              )}
+              {m.stalled && (
+                <>
+                  <circle cx={x} cy={y} r={size + 2.8} fill="none" stroke="#ff8b95"
+                          strokeWidth="0.45" strokeDasharray="0.8 1.2" />
+                  <text x={x} y={y + size + 4.2} textAnchor="middle" fontSize="1.8"
+                        fill="#ff8b95" className="font-mono">PANNE</text>
+                </>
               )}
               {urgent && m.kind !== "AMBIENT" && (
                 <circle cx={x} cy={y} r={size} fill={color} fillOpacity="0.25" className="animate-pulseRing" />

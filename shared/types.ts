@@ -48,10 +48,27 @@ export interface MessengerView {
   codename: string;
   candidateCount: number;
   dispatchedAt: number;
+  /** Projected arrival if it keeps moving. Meaningless while stalled. */
   arrivesAt: number;
   escorted: boolean;
   /** Progress 0..1 along the route — the client interpolates from this. */
   progress: number;
+  /** Total travel time the route requires, for client-side interpolation. */
+  transitMs: number;
+  /**
+   * True when the courier has run out of fuel. It freezes in place — still
+   * fully attackable — until its owner pays a booster on-chain. The amount
+   * owed is deliberately NOT sent: the bill is unknown even to its owner, who
+   * discovers it by paying until the courier moves again.
+   */
+  stalled: boolean;
+  /** Boosters paid so far. Public — it is on-chain anyway. */
+  boostCount: number;
+  /**
+   * bytes32 id needed to call `boost`. Sent only to the courier's owner, since
+   * only they may refuel it. Null without a chain, or for anyone else.
+   */
+  courierIdHex: string | null;
   /** The viewing player's own state on this messenger. */
   me: {
     pool: number[] | null;
@@ -85,6 +102,16 @@ export interface MatchView {
   winner: { slot: number; name: string; winType: WinType } | null;
   /** Cost of this player's next dispatch, or null if nothing to dispatch. */
   nextDispatch: { level: number; cost: number; affordable: boolean } | null;
+  /** Null when the server runs without a chain, so the UI hides wallet bits. */
+  chain: {
+    rpcUrl: string;
+    chainId: number;
+    courierFuelAddress: string;
+    unitPriceWei: string;
+    maxUnitsPerBoost: number;
+    /** The on-chain match id, as 0x-prefixed bytes32. */
+    matchIdHex: string;
+  } | null;
 }
 
 // ───────────────────────────── Minigames ─────────────────────────────────
@@ -167,5 +194,7 @@ export interface ClientToServer {
   attack: (p: { messengerId: string }) => void;
   submit: (p: MinigameSubmission) => void;
   commit: (p: { messengerId: string; keyIndex: number }) => void;
+  /** Tells the server which address this player will pay boosters from. */
+  linkWallet: (p: { address: string | null }) => void;
   leave: () => void;
 }

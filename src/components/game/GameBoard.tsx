@@ -6,7 +6,9 @@ import { BLACKOUT_CRACKS, OPERATION_STEPS } from "../../../shared/constants";
 import type { MatchView, MinigameSubmission, ShopItem } from "../../../shared/types";
 import MinigameHost from "../minigames/MinigameHost";
 import type { Toast } from "@/lib/useMatch";
+import type { useWallet } from "@/lib/useWallet";
 import ActionBar from "./ActionBar";
+import BoostPanel from "./BoostPanel";
 import AgencyPanel from "./AgencyPanel";
 import Ether from "./Ether";
 import EventLog from "./EventLog";
@@ -22,11 +24,13 @@ export default function GameBoard({
   view,
   toasts,
   minigame,
+  wallet,
   actions,
 }: {
   view: MatchView;
   toasts: Toast[];
   minigame: Parameters<typeof MinigameHost>[0]["assignment"] | null;
+  wallet: ReturnType<typeof useWallet>;
   actions: {
     dispatch: () => void;
     decoy: () => void;

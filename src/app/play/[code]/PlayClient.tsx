@@ -4,9 +4,12 @@ import Link from "next/link";
 import GameBoard from "@/components/game/GameBoard";
 import LobbyRoom from "@/components/game/LobbyRoom";
 import { useMatch } from "@/lib/useMatch";
+import { useWallet } from "@/lib/useWallet";
 
 export default function PlayClient({ code }: { code: string }) {
   const { view, status, fatal, toasts, minigame, actions } = useMatch(code);
+  // Boosters are paid by the player, so the browser needs its own signer.
+  const wallet = useWallet(view?.chain ?? null, actions.linkWallet);
 
   if (status === "error" || (!view && status !== "connecting")) {
     return (
@@ -41,6 +44,7 @@ export default function PlayClient({ code }: { code: string }) {
       view={view}
       toasts={toasts}
       minigame={minigame}
+      wallet={wallet}
       actions={{
         dispatch: actions.dispatch,
         decoy: actions.decoy,

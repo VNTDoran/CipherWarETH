@@ -9,6 +9,7 @@
  */
 
 import { prisma } from "../src/lib/db.js";
+import { chain } from "./chain/client.js";
 import { Match, type OperationSpec } from "./engine/match.js";
 import { DEFAULT_TUNING, type MinigameTuning } from "./engine/minigames.js";
 import type { MinigameKey } from "../shared/types.js";
@@ -161,4 +162,55 @@ export async function markStarted(match: Match): Promise<void> {
   } catch (err) {
     console.error("[persist] failed to mark match started", err);
   }
+}
+
+/**
+ * Writes the result to the chain and releases both pots.
+ *
+ * Only players who linked a wallet can appear on-chain or be paid, so a match
+ * played without wallets simply records nothing — the game itself is unaffected.
+ */
+function anchorResult(
+  match: Match,
+  results: ReturnType<Match["results"]>,
+  winner: { slot: number; userId: string } | undefined,
+): void {
+  if (!chain.enabled || !match.matchIdHex || !winner) return;
+
+  const withWallets = results
+    .map((r) => {
+      const p = match.playerList.find((x) => x.slot === r.slot);
+      return p?.wallet
+        ? {
+            player: p.wallet,
+            slot: r.slot,
+            directivesConfirmed: Math.min(255, r.directivesConfirmed),
+            cracksMade: Math.min(255, r.cracksMade),
+            finalIntel: Math.max(0, r.finalIntel),
+          }
+        : null;
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
+
+  if (!withWallets.some((r) => r.slot === winner.slot)) {
+    console.warn("[chain] winner has no linked wallet — skipping anchor");
+    return;
+  }
+
+  const winTypeCode =
+    match.winner?.winType === "OPERATION" ? 0 : match.winner?.winType === "BLACKOUT" ? 1 : 2;
+  const durationSeconds = match.startedAt
+    ? Math.round((Date.now() - match.startedAt) / 1000)
+    : 0;
+
+  chain.finalizeMatch(
+    match.matchIdHex,
+    winner.slot,
+    winTypeCode,
+    durationSeconds,
+    withWallets,
+  );
+
+  const winnerWallet = withWallets.find((r) => r.slot === winner.slot)!.player;
+  chain.payBounty(match.matchIdHex, winnerWallet);
 }

@@ -7,7 +7,7 @@
  */
 import { io } from "socket.io-client";
 
-const BASE = "http://localhost:3000";
+const BASE = process.env.BASE ?? "http://localhost:3000";
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function login(username) {

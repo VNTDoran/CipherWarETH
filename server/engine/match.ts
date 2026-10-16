@@ -7,7 +7,7 @@
  * a client needs to cheat never reaches it.
  */
 
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   AGENCY_CODES,
   AGENCY_META,
@@ -41,6 +41,8 @@ import {
   STARTING_INTEL,
   WRONG_COMMIT_COST,
   WRONG_COMMIT_LOCK_MS,
+  FUEL_SECONDS_PER_UNIT,
+  FUEL_UNITS_AT_DISPATCH,
   spyCost,
 } from "../../shared/constants.js";
 import type {
@@ -63,6 +65,7 @@ import {
   createMinigame,
   scoreMinigame,
 } from "./minigames.js";
+import { chain } from "../chain/client.js";
 
 export interface DirectiveSpec {
   level: number;
@@ -101,6 +104,8 @@ interface Player {
   burned: Set<number>;
   dossier: string[];
   lastPassiveAt: number;
+  /** Address this player pays boosters from, linked from the client. */
+  wallet: string | null;
 }
 
 interface Messenger {
@@ -113,7 +118,6 @@ interface Messenger {
   realKeyIndex: number;
   glyphs: string[];
   dispatchedAt: number;
-  arrivesAt: number;
   status: "IN_TRANSIT" | "ARRIVED" | "CRACKED";
   escorted: boolean;
   pools: Map<number, Set<number>>;
@@ -121,6 +125,31 @@ interface Messenger {
   locks: Map<number, number>;
   resolvedAt?: number;
   crackedBySlot?: number;
+
+  // ── Travel, measured in fuel rather than wall clock ───────────────────
+  // A courier used to have a fixed `arrivesAt`. With fuel it can freeze, so
+  // progress is accumulated only while it is actually moving.
+  /** Total travel time the route requires. */
+  transitMs: number;
+  /** Travel accumulated so far. Stops advancing while stalled. */
+  travelledMs: number;
+  /** Timestamp of the last tick that advanced (or considered) this courier. */
+  lastMoveAt: number;
+  /** Units paid for: at dispatch plus every booster. */
+  paidUnits: number;
+  /**
+   * Units this courier demands in total, derived from its secret preimage.
+   * Server-only — never serialised, because the bill is meant to be unknown
+   * even to the courier's owner.
+   */
+  requiredUnits: number;
+  boostCount: number;
+  /** bytes32 id used on-chain, or null when running without a chain. */
+  courierIdHex: string | null;
+  /** Commit-reveal nonce, held until the courier resolves. */
+  nonce: string | null;
+  /** True while the on-chain anchor is still confirming; hidden from play. */
+  pendingAnchor: boolean;
 }
 
 export interface MatchResultPlayer {
@@ -157,6 +186,8 @@ function downgrade(tier: Tier): Tier {
 export class Match {
   readonly code: string;
   dbId: string | null = null;
+  /** bytes32 match id used by every contract. Null without a chain. */
+  readonly matchIdHex: string | null;
   hostUserId: string;
   status: MatchStatus = "LOBBY";
   startedAt: number | null = null;
@@ -169,6 +200,8 @@ export class Match {
   /** One live challenge per player at a time. */
   private activeToken = new Map<number, string>();
   private log: LogEntry[] = [];
+  /** Couriers already announced as stalled, so the log says it once. */
+  private stalledNotified = new Set<string>();
   private lastAmbientAt = 0;
   private operations: OperationSpec[] = [];
   private tunings: MinigameTuning[] = DEFAULT_TUNING;
@@ -178,6 +211,7 @@ export class Match {
   constructor(code: string, hostUserId: string) {
     this.code = code;
     this.hostUserId = hostUserId;
+    this.matchIdHex = chain.enabled ? chain.idOf(`CIPHERWAR:${code}`) : null;
   }
 
   configure(operations: OperationSpec[], tunings: MinigameTuning[]) {
@@ -233,6 +267,7 @@ export class Match {
       burned: new Set(),
       dossier: [],
       lastPassiveAt: Date.now(),
+      wallet: null,
     };
     this.players.set(slot, player);
     this.pushLog("info", slot, `${name} joined as ${AGENCY_META[player.agency].name}.`);
@@ -473,6 +508,50 @@ export class Match {
     return { success: true, keyIndex, payout: this.resolveCrack(m, p) };
   }
 
+  /**
+   * Opens the envelope on-chain once a courier is resolved, whichever way it
+   * went. Fire-and-forget: the match has already moved on, and the contract
+   * rejects a mismatching preimage anyway, so there is nothing to await.
+   */
+  private revealOnChain(m: Messenger): void {
+    if (!chain.enabled || !this.matchIdHex || !m.courierIdHex || m.nonce === null) return;
+    chain.revealCourier(this.matchIdHex, m.courierIdHex, m.realKeyIndex, m.nonce);
+    chain.markLanded(this.matchIdHex, m.courierIdHex);
+  }
+
+  /** Links the wallet a player will pay boosters from. */
+  setWallet(userId: string, address: string | null): void {
+    const p = this.findByUser(userId);
+    if (p) p.wallet = address;
+  }
+
+  /**
+   * A booster landed on-chain. Credits the fuel and unfreezes the courier.
+   *
+   * Driven by the contract event rather than by the client, so a player cannot
+   * claim fuel they did not pay for — the money has to have actually moved.
+   */
+  applyBoost(courierIdHex: string, totalUnits: number): boolean {
+    const target = [...this.messengers.values()].find(
+      (m) => m.courierIdHex?.toLowerCase() === courierIdHex.toLowerCase(),
+    );
+    if (!target || target.status !== "IN_TRANSIT") return false;
+
+    target.paidUnits = totalUnits;
+    target.boostCount += 1;
+    this.stalledNotified.delete(target.id);
+    // Resume from now, so time spent stalled is not retroactively credited.
+    target.lastMoveAt = Date.now();
+
+    const owner = target.ownerSlot === null ? null : this.players.get(target.ownerSlot);
+    this.pushLog(
+      "buy",
+      target.ownerSlot,
+      `${owner ? AGENCY_META[owner.agency].name : "Un agent"} a ravitaillé ${target.codename}.`,
+    );
+    return true;
+  }
+
   // ────────────────────────────── Tick ─────────────────────────────────
 
   tick(): boolean {
@@ -480,8 +559,39 @@ export class Match {
     const now = Date.now();
     let changed = false;
 
+    // Advance each courier by the time it actually spent moving. A courier
+    // whose fuel has run out burns no distance at all — it sits frozen in the
+    // ether, still attackable, until a booster lands.
     for (const m of this.messengers.values()) {
-      if (m.status === "IN_TRANSIT" && now >= m.arrivesAt) {
+      if (m.status !== "IN_TRANSIT") continue;
+
+      const dt = Math.max(0, now - m.lastMoveAt);
+      m.lastMoveAt = now;
+
+      // Still waiting for its on-chain anchor: not in play yet, cannot move.
+      if (m.pendingAnchor) continue;
+
+      const fuelMs = m.paidUnits >= Number.MAX_SAFE_INTEGER
+        ? Number.MAX_SAFE_INTEGER
+        : m.paidUnits * FUEL_SECONDS_PER_UNIT * 1000;
+
+      if (m.travelledMs >= fuelMs) {
+        // Out of fuel. Frozen, but the attack clock keeps running for rivals.
+        if (!this.stalledNotified.has(m.id)) {
+          this.stalledNotified.add(m.id);
+          const owner = m.ownerSlot === null ? null : this.players.get(m.ownerSlot);
+          if (owner) {
+            this.pushLog("info", m.ownerSlot, `${m.codename} est en panne de carburant.`);
+          }
+          changed = true;
+        }
+        continue;
+      }
+
+      // Never travel further than the fuel paid for in this step.
+      m.travelledMs = Math.min(m.travelledMs + dt, fuelMs);
+
+      if (m.travelledMs >= m.transitMs) {
         this.resolveArrival(m);
         changed = true;
       }
@@ -609,20 +719,111 @@ export class Match {
         (_, i) => GLYPHS[(i + Math.floor(Math.random() * GLYPHS.length)) % GLYPHS.length],
       ),
       dispatchedAt: now,
-      arrivesAt: now + opts.transitMs,
       status: "IN_TRANSIT",
       escorted: opts.escorted,
       pools: new Map(),
       cooldowns: new Map(),
       locks: new Map(),
+      transitMs: opts.transitMs,
+      travelledMs: 0,
+      lastMoveAt: now,
+      // Without a chain the courier carries fuel for the whole trip, so it
+      // never stalls and the original game is untouched.
+      paidUnits: chain.enabled ? FUEL_UNITS_AT_DISPATCH : Number.MAX_SAFE_INTEGER,
+      requiredUnits: 0,
+      boostCount: 0,
+      courierIdHex: null,
+      nonce: null,
+      pendingAnchor: false,
     };
+
+    // Ambient traffic and decoys are not anchored: they carry no directive, so
+    // there is nothing to prove and no reason to spend gas on them.
+    if (chain.enabled && this.matchIdHex && opts.kind === "DIRECTIVE" && opts.ownerSlot !== null) {
+      this.anchorCourier(m, opts.ownerSlot);
+    } else if (chain.enabled) {
+      m.paidUnits = Number.MAX_SAFE_INTEGER;
+    }
+
     this.messengers.set(m.id, m);
+  }
+
+  /**
+   * Publishes the commitment and the fuel bill, then releases the courier.
+   *
+   * The commitment MUST land before the courier can be attacked, otherwise the
+   * server would keep a window in which to pick the key after the fact — which
+   * would void the whole guarantee. So the courier is held back until both
+   * transactions confirm, and dropped entirely if either fails.
+   */
+  private anchorCourier(m: Messenger, ownerSlot: number) {
+    const owner = this.players.get(ownerSlot);
+    const wallet = owner?.wallet;
+    if (!owner || !wallet) {
+      // No wallet linked: fall back to unlimited fuel rather than stranding a
+      // courier nobody can refuel.
+      m.paidUnits = Number.MAX_SAFE_INTEGER;
+      return;
+    }
+
+    const courierIdHex = chain.idOf(`${this.code}:${m.id}`);
+    const nonce = `0x${randomBytes(32).toString("hex")}`;
+    const required = chain.requiredUnitsOf(
+      this.matchIdHex!,
+      courierIdHex,
+      m.realKeyIndex,
+      nonce,
+    );
+
+    m.courierIdHex = courierIdHex;
+    m.nonce = nonce;
+    m.requiredUnits = required;
+    m.status = "IN_TRANSIT";
+    // Held out of play until the anchor confirms.
+    m.pendingAnchor = true;
+
+    const commitment = chain.commitmentOf(this.matchIdHex!, courierIdHex, m.realKeyIndex, nonce);
+    const windowSeconds = Math.ceil(m.transitMs / 1000) + 600;
+
+    void (async () => {
+      const committed = await chain.commitCourier(
+        this.matchIdHex!,
+        courierIdHex,
+        commitment,
+        m.candidateCount,
+        windowSeconds,
+      );
+      const registered = committed
+        ? await chain.registerCourier(
+            this.matchIdHex!,
+            courierIdHex,
+            wallet,
+            FUEL_UNITS_AT_DISPATCH,
+            required,
+          )
+        : false;
+
+      if (!committed || !registered) {
+        this.messengers.delete(m.id);
+        if (m.kind === "DIRECTIVE") owner.inTransit = false;
+        this.pushLog("info", ownerSlot, `${m.codename} n'a pas pu être ancré — dispatch annulé.`);
+        return;
+      }
+      m.pendingAnchor = false;
+      m.lastMoveAt = Date.now();
+      this.pushLog(
+        "info",
+        ownerSlot,
+        `${m.codename} ancré on-chain (${FUEL_UNITS_AT_DISPATCH} unités de carburant).`,
+      );
+    })();
   }
 
   private resolveCrack(m: Messenger, cracker: Player): number {
     m.status = "CRACKED";
     m.resolvedAt = Date.now();
     m.crackedBySlot = cracker.slot;
+    this.revealOnChain(m);
 
     if (m.kind === "AMBIENT") {
       cracker.intel += AMBIENT_PAYOUT;
@@ -674,6 +875,7 @@ export class Match {
   private resolveArrival(m: Messenger) {
     m.status = "ARRIVED";
     m.resolvedAt = Date.now();
+    this.revealOnChain(m);
     if (m.ownerSlot === null) return;
     const owner = this.players.get(m.ownerSlot);
     if (!owner) return;
@@ -778,11 +980,17 @@ export class Match {
     }));
 
     const messengers: MessengerView[] = [...this.messengers.values()]
+      // A courier whose anchor has not confirmed is not in play yet.
+      .filter((m) => !m.pendingAnchor)
       .filter((m) => m.status === "IN_TRANSIT" || (m.resolvedAt ?? 0) > now - 3500)
       .map((m) => {
         const pool = m.pools.get(mySlot);
-        const span = Math.max(1, m.arrivesAt - m.dispatchedAt);
         const isMine = m.ownerSlot === mySlot;
+        const fuelMs = m.paidUnits >= Number.MAX_SAFE_INTEGER
+          ? Number.MAX_SAFE_INTEGER
+          : m.paidUnits * FUEL_SECONDS_PER_UNIT * 1000;
+        const stalled = m.status === "IN_TRANSIT" && m.travelledMs >= fuelMs;
+        const remainingMs = Math.max(0, m.transitMs - m.travelledMs);
         return {
           id: m.id,
           ownerSlot: m.ownerSlot,
@@ -792,9 +1000,15 @@ export class Match {
           codename: isMine && m.kind === "DECOY" ? "LEURRE" : m.codename,
           candidateCount: m.candidateCount,
           dispatchedAt: m.dispatchedAt,
-          arrivesAt: m.arrivesAt,
+          // Projected, not fixed: a stall pushes it back indefinitely.
+          arrivesAt: now + remainingMs,
           escorted: m.escorted,
-          progress: Math.min(1, Math.max(0, (now - m.dispatchedAt) / span)),
+          progress: Math.min(1, Math.max(0, m.travelledMs / Math.max(1, m.transitMs))),
+          transitMs: m.transitMs,
+          stalled,
+          boostCount: m.boostCount,
+          // Only the owner can refuel, so only the owner needs the handle.
+          courierIdHex: isMine ? m.courierIdHex : null,
           me: {
             pool: pool ? [...pool].sort((a, b) => a - b) : null,
             engaged: !!pool,
@@ -830,6 +1044,17 @@ export class Match {
       log: this.log.slice(-6),
       winner: this.winner,
       nextDispatch,
+      chain:
+        chain.enabled && this.matchIdHex
+          ? {
+              rpcUrl: chain.rpcUrl,
+              chainId: chain.chainId,
+              courierFuelAddress: chain.fuelAddress,
+              unitPriceWei: chain.unitPriceWei,
+              maxUnitsPerBoost: chain.maxUnitsPerBoost,
+              matchIdHex: this.matchIdHex,
+            }
+          : null,
     };
   }
 

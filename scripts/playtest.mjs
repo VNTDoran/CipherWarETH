@@ -5,7 +5,7 @@
  */
 import { io } from "socket.io-client";
 
-const BASE = "http://localhost:3000";
+const BASE = process.env.BASE ?? "http://localhost:3000";
 const log = (...a) => console.log(...a);
 
 async function login(username) {

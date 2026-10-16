@@ -150,6 +150,7 @@ export function useMatch(code: string) {
       submit: (s: MinigameSubmission) => emit("submit", s),
       commit: (messengerId: string, keyIndex: number) =>
         emit("commit", { messengerId, keyIndex }),
+      linkWallet: (address: string | null) => emit("linkWallet", { address }),
     },
   };
 }
