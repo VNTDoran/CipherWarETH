@@ -15,3 +15,6 @@ chain/cache
 chain/chain.env
 chain/public/cipherchain-info.json
 chain/*.log
+
+# Local prompt archives — never published
+.prompts/
