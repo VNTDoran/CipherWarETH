@@ -126,10 +126,29 @@ function attachFinishHook(match: Match) {
   };
 }
 
+/**
+ * Socket.IO swallows anything a handler throws and logs a bare "@TODO", which
+ * makes a real bug look like noise. Wrapping every handler means a failure
+ * names itself, keeps its stack, and tells the player something went wrong
+ * instead of the action silently doing nothing.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function safe(socket: Socket, event: string, handler: (...args: any[]) => unknown) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  socket.on(event, async (...args: any[]) => {
+    try {
+      await handler(...args);
+    } catch (err) {
+      console.error(`[socket] ${event} failed`, err);
+      socket.emit("errorMsg", { message: "Something went wrong on the server." });
+    }
+  });
+}
+
 io.on("connection", (socket: Socket) => {
   const data = socket.data as SocketData;
 
-  socket.on("join", async (payload: { code: string }, ack) => {
+  safe(socket, "join", async (payload: { code: string }, ack) => {
     const respond = typeof ack === "function" ? ack : () => {};
     const match = getMatch(payload?.code ?? "");
     if (!match) return respond({ ok: false, error: "No such match code." });
@@ -144,14 +163,14 @@ io.on("connection", (socket: Socket) => {
     broadcast(match);
   });
 
-  socket.on("ready", (p: { ready: boolean }) => {
+  safe(socket, "ready", (p: { ready: boolean }) => {
     const match = data.code ? getMatch(data.code) : undefined;
     if (!match) return;
     match.setReady(data.userId, !!p?.ready);
     broadcast(match);
   });
 
-  socket.on("start", async () => {
+  safe(socket, "start", async () => {
     const match = data.code ? getMatch(data.code) : undefined;
     if (!match) return;
     const err = match.canStart(data.userId);
@@ -164,7 +183,7 @@ io.on("connection", (socket: Socket) => {
     broadcast(match);
   });
 
-  socket.on("dispatch", () => {
+  safe(socket, "dispatch", () => {
     const match = data.code ? getMatch(data.code) : undefined;
     if (!match) return;
     const err = match.dispatch(data.userId);
@@ -172,7 +191,7 @@ io.on("connection", (socket: Socket) => {
     broadcast(match);
   });
 
-  socket.on("decoy", () => {
+  safe(socket, "decoy", () => {
     const match = data.code ? getMatch(data.code) : undefined;
     if (!match) return;
     const err = match.decoy(data.userId);
@@ -180,7 +199,7 @@ io.on("connection", (socket: Socket) => {
     broadcast(match);
   });
 
-  socket.on("buy", (p: { item: ShopItem }) => {
+  safe(socket, "buy", (p: { item: ShopItem }) => {
     const match = data.code ? getMatch(data.code) : undefined;
     if (!match || !p?.item) return;
     const err = match.buy(data.userId, p.item);
@@ -188,7 +207,7 @@ io.on("connection", (socket: Socket) => {
     broadcast(match);
   });
 
-  socket.on("attack", (p: { messengerId: string }) => {
+  safe(socket, "attack", (p: { messengerId: string }) => {
     const match = data.code ? getMatch(data.code) : undefined;
     if (!match || !p?.messengerId) return;
     const result = match.attack(data.userId, p.messengerId);
@@ -201,7 +220,7 @@ io.on("connection", (socket: Socket) => {
     broadcast(match);
   });
 
-  socket.on("submit", (p: MinigameSubmission) => {
+  safe(socket, "submit", (p: MinigameSubmission) => {
     const match = data.code ? getMatch(data.code) : undefined;
     if (!match || !p?.token) return;
     const result = match.submit(data.userId, p);
@@ -210,7 +229,7 @@ io.on("connection", (socket: Socket) => {
     broadcast(match);
   });
 
-  socket.on("commit", (p: { messengerId: string; keyIndex: number }) => {
+  safe(socket, "commit", (p: { messengerId: string; keyIndex: number }) => {
     const match = data.code ? getMatch(data.code) : undefined;
     if (!match || !p?.messengerId) return;
     const res = match.commit(data.userId, p.messengerId, Number(p.keyIndex));
@@ -224,7 +243,7 @@ io.on("connection", (socket: Socket) => {
     broadcast(match);
   });
 
-  socket.on("linkWallet", (p: { address: string | null }) => {
+  safe(socket, "linkWallet", (p: { address: string | null }) => {
     const match = data.code ? getMatch(data.code) : undefined;
     if (!match) return;
     const addr = typeof p?.address === "string" ? p.address : null;
@@ -232,7 +251,7 @@ io.on("connection", (socket: Socket) => {
     broadcast(match);
   });
 
-  socket.on("leave", () => {
+  safe(socket, "leave", () => {
     const match = data.code ? getMatch(data.code) : undefined;
     if (!match) return;
     const code = match.code;

@@ -7,7 +7,7 @@
  * would be worse than useless — it would show a stale board.
  */
 
-const CACHE = "cipher-war-v1";
+const CACHE = "cipher-war-v2";
 const SHELL = ["/", "/lobby", "/offline.html", "/manifest.webmanifest", "/icons/icon.svg", "/icons/icon-192.png"];
 
 self.addEventListener("install", (event) => {
@@ -37,6 +37,10 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
   // Live data and the websocket handshake must never be served from cache.
   if (url.pathname.startsWith("/api/")) return;
+  // Build output is either content-hashed (production) or name-stable across
+  // rebuilds (development). Caching it buys nothing, and in dev it pairs fresh
+  // HTML with stale JavaScript — which looks exactly like your changes vanishing.
+  if (url.pathname.startsWith("/_next/")) return;
 
   if (request.mode === "navigate") {
     event.respondWith(

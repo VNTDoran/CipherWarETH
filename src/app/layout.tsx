@@ -31,11 +31,31 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           rel="stylesheet"
         />
       </head>
-      <body className="min-h-full antialiased">
+      {/* Wallet extensions inject attributes and nodes into <body> before React
+          hydrates, which React reports as a mismatch even though nothing in the
+          app differs. This suppresses that one comparison; it does not hide
+          mismatches inside the app's own tree. */}
+      <body className="min-h-full antialiased" suppressHydrationWarning>
         {children}
+        {/*
+          The service worker is a PRODUCTION-ONLY concern.
+
+          It serves /_next/static/* cache-first, which is safe in production
+          because those filenames are content-hashed. In development they are
+          not — `main-app.js` keeps its name across rebuilds — so the worker
+          happily pairs fresh HTML with stale JavaScript and you end up staring
+          at an old build wondering why your changes vanished.
+
+          In dev we therefore do the opposite of registering: tear down any
+          worker a previous run installed and drop its caches, otherwise a
+          developer who ever loaded the app in production mode stays poisoned.
+        */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){})})}`,
+            __html:
+              process.env.NODE_ENV === "production"
+                ? `if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){})})}`
+                : `if('serviceWorker' in navigator){navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){r.unregister()})}).catch(function(){});if(window.caches){caches.keys().then(function(ks){ks.forEach(function(k){caches.delete(k)})}).catch(function(){})}}`,
           }}
         />
       </body>

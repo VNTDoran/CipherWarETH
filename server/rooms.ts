@@ -100,6 +100,10 @@ export async function persistResult(match: Match): Promise<void> {
   const results = match.results();
   const winner = results.find((r) => r.isWinner);
 
+  // Anchor the outcome and release both pots before the database write: it is
+  // the part players can actually verify, so a DB failure must not skip it.
+  anchorResult(match, results, winner);
+
   try {
     await prisma.$transaction(async (tx) => {
       await tx.match.update({

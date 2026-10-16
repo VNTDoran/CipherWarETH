@@ -132,6 +132,20 @@ async function main() {
     }
   }
 
+  // Operations are keyed by name, so renaming one leaves the old row behind
+  // as an active duplicate — which is exactly what happened when the lore was
+  // translated. Retire anything not in the current set rather than letting the
+  // engine keep dealing stale plots.
+  const current = OPERATIONS.map((o) => o.name);
+  const stale = await prisma.operationTemplate.findMany({
+    where: { name: { notIn: current } },
+    select: { id: true, name: true },
+  });
+  if (stale.length) {
+    await prisma.operationTemplate.deleteMany({ where: { id: { in: stale.map((o) => o.id) } } });
+    console.log(`Removed ${stale.length} stale operation(s): ${stale.map((o) => o.name).join(", ")}`);
+  }
+
   // ── Minigame tuning ───────────────────────────────────────────────────
   const games = [
     { key: "cipher_type", label: "Cipher Type", durationMs: 5000, silverAt: 55, goldAt: 80, weight: 1 },

@@ -133,7 +133,7 @@ async function main() {
   if (Math.abs(p2 - p1) > 0.01) throw new Error("a stalled courier is still moving");
 
   // ── Boost from the player's own wallet ────────────────────────────────
-  console.log("\n3) A paie des boosters depuis son propre portefeuille…");
+  console.log("\n3) A pays boosters from its own wallet...");
   let boosts = 0;
   for (let i = 0; i < 8; i++) {
     const owed = Number(await fuel.unitsOutstanding(sa.chain.matchIdHex, courier.courierIdHex));
@@ -168,7 +168,7 @@ async function main() {
     console.log("   (status unreadable - CHAIN_COMMIT_REVEAL_ADDRESS not passed to the script)");
   }
 
-  console.log("\nOK — ancrage, panne, booster et reprise fonctionnent de bout en bout.");
+  console.log("\nOK - anchoring, stall, booster and resume all work end to end.");
   a.disconnect();
   b.disconnect();
   process.exit(0);

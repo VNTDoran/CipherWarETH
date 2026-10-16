@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import GameBoard from "@/components/game/GameBoard";
 import LobbyRoom from "@/components/game/LobbyRoom";
 import { useMatch } from "@/lib/useMatch";
@@ -11,7 +12,26 @@ export default function PlayClient({ code }: { code: string }) {
   // Boosters are paid by the player, so the browser needs its own signer.
   const wallet = useWallet(view?.chain ?? null, actions.linkWallet);
 
-  if (status === "error" || (!view && status !== "connecting")) {
+  // Nothing on this screen can be server-rendered meaningfully: it is driven
+  // entirely by a live socket, and it reads the clock and the injected wallet
+  // provider. Holding the first paint until after mount makes the server HTML
+  // and the first client HTML identical by construction, which removes the
+  // whole class of hydration mismatch — including the one a wallet extension
+  // causes by mutating the DOM before React gets there.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  if (!mounted || (!view && status === "connecting")) {
+    return (
+      <main className="flex min-h-dvh items-center justify-center">
+        <p className="animate-flicker font-mono text-[11px] uppercase tracking-[0.4em] text-slate-300">
+          establishing channel…
+        </p>
+      </main>
+    );
+  }
+
+  if (status === "error" || !view) {
     return (
       <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-4 px-5 text-center">
         <p className="font-mono text-[11px] uppercase tracking-[0.3em] text-alert">
