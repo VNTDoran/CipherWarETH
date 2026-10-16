@@ -22,7 +22,7 @@ async function main() {
     await c.waitForDeployment();
     const address = await c.getAddress();
     deployed[name] = { address, abi: (await artifacts.readArtifact(name)).abi };
-    console.log(`${name.padEnd(22)} déployé à : ${address}`);
+    console.log(`${name.padEnd(22)} deployed at ${address}`);
     return c;
   }
 
@@ -42,28 +42,13 @@ async function main() {
     await (await token.mint(p.address, seed)).wait();
   }
   console.log("");
-  console.log("Serveur de jeu (compte #0) :", server.address);
+  console.log("Game server (account #0) :", server.address);
   players.forEach((p, i) =>
-    console.log(`Joueur ${i + 1} (compte #${i + 1})      : ${p.address}  (5000 INTEL)`),
+    console.log(`Player ${i + 1}  (account #${i + 1}) : ${p.address}  (5000 INTEL)`),
   );
 
-  const info = {
-    chainId: 31337,
-    rpc: "http://127.0.0.1:8545",
-    gameServer: server.address,
-    players: players.map((p) => p.address),
-    intelToken: deployed.IntelToken,
-    commitReveal: deployed.CommitRevealRegistry,
-    matchRegistry: deployed.MatchRegistry,
-    courierFuel: deployed.CourierFuel,
-    tournamentEscrow: deployed.TournamentEscrow,
-  };
-
-  const out = path.join(__dirname, "..", "public", "cipherchain-info.json");
-  fs.writeFileSync(out, JSON.stringify(info, null, 2));
-  console.log("\nÉcrit :", out);
-
-  // The Next.js game server reads these to know where to send its txs.
+  // The game reads addresses from its own .env and ABIs straight from
+  // artifacts/, so there is no separate front-end bundle to feed.
   const env = [
     `CHAIN_ENABLED="true"`,
     `CHAIN_RPC_URL="http://127.0.0.1:8545"`,
@@ -77,8 +62,8 @@ async function main() {
   ].join("\n");
   const envPath = path.join(__dirname, "..", "chain.env");
   fs.writeFileSync(envPath, env);
-  console.log("Écrit :", envPath);
-  console.log("\n→ Copiez le contenu de chain.env dans le .env du jeu.");
+  console.log("\nWrote:", envPath);
+  console.log("→ Copy the contents of chain.env into the game's .env, then restart it.");
 }
 
 main().catch((e) => {

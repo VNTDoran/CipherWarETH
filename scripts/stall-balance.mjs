@@ -73,7 +73,7 @@ async function run(reactionMs) {
   await wait(300);
   a.emit("start");
   await wait(600);
-  if (!sa?.chain) throw new Error("chain is off — set the CHAIN_* vars");
+  if (!sa?.chain) throw new Error("chain is off - set the CHAIN_* vars");
 
   const fuel = new Contract(sa.chain.courierFuelAddress, FUEL_ABI, wA);
 
@@ -143,10 +143,10 @@ async function run(reactionMs) {
 }
 
 const fast = await run(1000);
-console.log(`réaction 1 s  : ${fast.attacks} attaques · ${fast.cracked ? "CRAQUÉ" : "arrivé"} · étape ${fast.step}`);
+console.log(`reaction 1s : ${fast.attacks} attacks - ${fast.cracked ? "CRACKED" : "landed"} - step ${fast.step}`);
 await wait(1500);
 const slow = await run(9000);
-console.log(`réaction 9 s  : ${slow.attacks} attaques · ${slow.cracked ? "CRAQUÉ" : "arrivé"} · étape ${slow.step}`);
+console.log(`reaction 9s : ${slow.attacks} attacks - ${slow.cracked ? "CRACKED" : "landed"} - step ${slow.step}`);
 console.log("");
-console.log(`Une réaction lente a coûté ${slow.attacks - fast.attacks} fenêtre(s) d'attaque supplémentaire(s).`);
+console.log(`A slow reaction cost ${slow.attacks - fast.attacks} extra attack window(s).`);
 process.exit(0);

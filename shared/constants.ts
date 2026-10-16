@@ -72,32 +72,32 @@ export const AGENCY_META: Record<
   { name: string; country: string; color: string; sigil: string; motto: string }
 > = {
   NORD: {
-    name: "Direction Nord",
+    name: "North Directorate",
     country: "Verhalen",
     color: "#38bdf8",
     sigil: "N",
-    motto: "Le silence est une arme",
+    motto: "Silence is a weapon",
   },
   EST: {
-    name: "Bureau Est",
+    name: "East Bureau",
     country: "Kaldera",
     color: "#f472b6",
     sigil: "E",
-    motto: "Nous lisons tout",
+    motto: "We read everything",
   },
   SUD: {
-    name: "Section Sud",
+    name: "South Section",
     country: "Marenne",
     color: "#4ade80",
     sigil: "S",
-    motto: "Patience, puis frappe",
+    motto: "Patience, then the strike",
   },
   OUEST: {
-    name: "Cellule Ouest",
+    name: "West Cell",
     country: "Tarsis",
     color: "#fb923c",
     sigil: "O",
-    motto: "Rien n'est perdu",
+    motto: "Nothing is ever lost",
   },
 };
 

@@ -17,17 +17,17 @@ function commitmentOf(matchId, courierId, keyIndex, nonce) {
   );
 }
 
-const STATUS = ["Inconnu", "Engagé (en vol)", "Révélé et prouvé", "Défaillant"];
+const STATUS = ["Unknown", "Committed (in flight)", "Revealed and proven", "Defaulted"];
 
 const ERROR_FR = {
-  BadCommitment: "BadCommitment — l'empreinte ne correspond pas au couple (index, nonce) annoncé",
-  NotGameServer: "NotGameServer — seul le serveur de jeu peut engager ou révéler",
-  AlreadyCommitted: "AlreadyCommitted — ce messager a déjà un engagement",
-  NotCommitted: "NotCommitted — aucun engagement pour ce messager",
-  AlreadyRevealed: "AlreadyRevealed — déjà révélé",
-  RevealWindowClosed: "RevealWindowClosed — délai de révélation dépassé",
-  IndexOutOfRange: "IndexOutOfRange — index hors du nombre de clés candidates",
-  InvalidWindow: "InvalidWindow — fenêtre de révélation invalide",
+  BadCommitment: "BadCommitment — the hash does not match the (index, nonce) pair declared",
+  NotGameServer: "NotGameServer — only the game server may commit or reveal",
+  AlreadyCommitted: "AlreadyCommitted — this courier already has a commitment",
+  NotCommitted: "NotCommitted — no commitment for this courier",
+  AlreadyRevealed: "AlreadyRevealed — already revealed",
+  RevealWindowClosed: "RevealWindowClosed — the reveal deadline has passed",
+  IndexOutOfRange: "IndexOutOfRange — index beyond the candidate key count",
+  InvalidWindow: "InvalidWindow — invalid reveal window",
 };
 
 /**
@@ -47,7 +47,7 @@ function decodeRevert(contract, e) {
     }
   }
   if (e?.revert?.name) return ERROR_FR[e.revert.name] ?? e.revert.name;
-  return e?.shortMessage || e?.message || "erreur inconnue";
+  return e?.shortMessage || e?.message || "unknown error";
 }
 
 async function main() {
@@ -55,7 +55,7 @@ async function main() {
   const Factory = await ethers.getContractFactory("CommitRevealRegistry");
   const registry = await Factory.deploy(server.address);
   await registry.waitForDeployment();
-  console.log("Registre déployé à :", await registry.getAddress());
+  console.log("Registry deployed at", await registry.getAddress());
   console.log("");
 
   const matchId = ethers.id("DEMO-MATCH");
@@ -67,50 +67,50 @@ async function main() {
   const nonce = ethers.hexlify(ethers.randomBytes(32));
   const commitment = commitmentOf(matchId, courierId, realIndex, nonce);
 
-  console.log("1) Le serveur tire sa clé en secret");
-  console.log("   index réel  :", realIndex, "(connu du serveur seul)");
-  console.log("   nonce       :", nonce);
-  console.log("   empreinte   :", commitment);
+  console.log("1) The server draws its key in secret");
+  console.log("   real index :", realIndex, "(known only to the server)");
+  console.log("   nonce      :", nonce);
+  console.log("   hash       :", commitment);
   console.log("");
 
   // ── 2. Commit, before the courier is attackable ───────────────────────
   await (await registry.commitCourier(matchId, courierId, commitment, CANDIDATES, 600)).wait();
-  console.log("2) Engagement publié on-chain");
-  console.log("   état        :", STATUS[Number(await registry.statusOf(matchId, courierId))]);
+  console.log("2) Commitment published on-chain");
+  console.log("   state      :", STATUS[Number(await registry.statusOf(matchId, courierId))]);
   const stored = await registry.getCourier(matchId, courierId);
-  console.log("   stocké      :", stored.commitment);
-  console.log("   → l'index n'apparaît nulle part : la chaîne ne voit que l'empreinte.");
+  console.log("   stored     :", stored.commitment);
+  console.log("   -> the index appears nowhere: the chain only ever sees the hash.");
   console.log("");
 
   // ── 3. A dishonest reveal is refused ──────────────────────────────────
-  console.log("3) Le serveur tente de tricher : il annonce 9 au lieu de", realIndex);
+  console.log("3) The server tries to cheat: it claims 9 instead of", realIndex);
   try {
     await registry.revealCourier(matchId, courierId, 9, nonce);
-    console.log("   ÉCHEC DU TEST : la triche est passée !");
+    console.log("   TEST FAILED: the cheat went through!");
   } catch (e) {
-    console.log("   rejeté      :", decodeRevert(registry, e));
-    console.log("   → le contrat recalcule l'empreinte et refuse : le mensonge");
-    console.log("     ne peut même pas être inscrit dans l'historique.");
+    console.log("   rejected   :", decodeRevert(registry, e));
+    console.log("   -> the contract recomputes the hash and refuses: the lie");
+    console.log("      cannot even be written into the record.");
   }
   console.log("");
 
   // ── 4. The honest reveal goes through ─────────────────────────────────
   await (await registry.revealCourier(matchId, courierId, realIndex, nonce)).wait();
-  console.log("4) Révélation honnête acceptée");
-  console.log("   état        :", STATUS[Number(await registry.statusOf(matchId, courierId))]);
+  console.log("4) Honest reveal accepted");
+  console.log("   state      :", STATUS[Number(await registry.statusOf(matchId, courierId))]);
   console.log("");
 
   // ── 5. Anyone verifies, with no privilege ─────────────────────────────
   const asObserver = registry.connect(observer);
   const c = await asObserver.getCourier(matchId, courierId);
   const recomputed = commitmentOf(matchId, courierId, Number(c.keyIndex), c.nonce);
-  console.log("5) Vérification par un tiers (compte", observer.address.slice(0, 10) + "…)");
-  console.log("   empreinte stockée    :", c.commitment);
-  console.log("   empreinte recalculée :", recomputed);
-  console.log("   identiques           :", recomputed === c.commitment);
-  console.log("   isProven()           :", await asObserver.isProven(matchId, courierId));
+  console.log("5) Verified by a third party (account", observer.address.slice(0, 10) + "...)");
+  console.log("   stored hash     :", c.commitment);
+  console.log("   recomputed hash :", recomputed);
+  console.log("   identical       :", recomputed === c.commitment);
+  console.log("   isProven()      :", await asObserver.isProven(matchId, courierId));
   console.log("");
-  console.log("   → la clé réelle était l'index", Number(c.keyIndex), ", fixé AVANT la partie.");
+  console.log("   -> the real key was index", Number(c.keyIndex), "- fixed BEFORE the match.");
 }
 
 main().catch((e) => {

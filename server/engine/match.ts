@@ -167,7 +167,7 @@ export interface MatchResultPlayer {
 }
 
 const OPERATION_FALLBACK: OperationSpec = {
-  name: "OPÉRATION SANS NOM",
+  name: "UNNAMED OPERATION",
   description: "Directive chain issued under emergency protocol.",
   directives: DIRECTIVES.map((d) => ({
     level: d.level,
@@ -547,7 +547,7 @@ export class Match {
     this.pushLog(
       "buy",
       target.ownerSlot,
-      `${owner ? AGENCY_META[owner.agency].name : "Un agent"} a ravitaillé ${target.codename}.`,
+      `${owner ? AGENCY_META[owner.agency].name : "An agency"} refuelled ${target.codename}.`,
     );
     return true;
   }
@@ -581,7 +581,7 @@ export class Match {
           this.stalledNotified.add(m.id);
           const owner = m.ownerSlot === null ? null : this.players.get(m.ownerSlot);
           if (owner) {
-            this.pushLog("info", m.ownerSlot, `${m.codename} est en panne de carburant.`);
+            this.pushLog("info", m.ownerSlot, `${m.codename} has run out of fuel.`);
           }
           changed = true;
         }
@@ -806,7 +806,7 @@ export class Match {
       if (!committed || !registered) {
         this.messengers.delete(m.id);
         if (m.kind === "DIRECTIVE") owner.inTransit = false;
-        this.pushLog("info", ownerSlot, `${m.codename} n'a pas pu être ancré — dispatch annulé.`);
+        this.pushLog("info", ownerSlot, `${m.codename} could not be anchored on-chain — dispatch cancelled.`);
         return;
       }
       m.pendingAnchor = false;
@@ -814,7 +814,7 @@ export class Match {
       this.pushLog(
         "info",
         ownerSlot,
-        `${m.codename} ancré on-chain (${FUEL_UNITS_AT_DISPATCH} unités de carburant).`,
+        `${m.codename} anchored on-chain with ${FUEL_UNITS_AT_DISPATCH} fuel units.`,
       );
     })();
   }
@@ -836,7 +836,7 @@ export class Match {
     if (m.kind === "DECOY") {
       // Taking the bait is the punishment for attacking on reflex.
       cracker.intel = Math.max(0, cracker.intel - DECOY_PENALTY);
-      cracker.dossier.push(`[CORROMPU] ${m.codename} — contenu falsifié.`);
+      cracker.dossier.push(`[CORRUPTED] ${m.codename} — contents were forged.`);
       if (owner) {
         owner.intel += DECOY_REWARD;
         owner.decoysBaited += 1;

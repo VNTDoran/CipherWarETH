@@ -158,12 +158,15 @@ Le déploiement écrit `public/cipherchain-info.json` (adresse + ABI), que la pa
 va chercher au chargement — même principe que `escrow-info.json`.
 
 ```bash
-# 3 — servir la page de démonstration
-cd chain
-npx http-server public -p 8080 -c-1
+# 3 — le jeu (un seul port, une seule interface)
+cd ..
+npm run dev
 ```
 
-Puis ouvrir <http://127.0.0.1:8080> **dans Chrome avec MetaMask**.
+Puis ouvrir <http://localhost:3100> **dans Chrome avec MetaMask**. La preuve
+on-chain se consulte dans le jeu, page **/chain** (lien « audit » depuis le
+lobby) : pour chaque messager résolu, l'empreinte est recalculée dans le
+navigateur et comparée à celle stockée.
 
 ### MetaMask
 
@@ -188,49 +191,36 @@ Puis ouvrir <http://127.0.0.1:8080> **dans Chrome avec MetaMask**.
 
 ## 6. La démonstration
 
-La console (`public/index.html`) couvre tout le cycle. Elle détecte le compte
-connecté et grise ce qui ne lui est pas permis, donc la démonstration consiste à
-**changer de compte dans MetaMask** aux bons moments — ce qui montre au passage
-que les rôles sont appliqués par les contrats, pas par l'interface.
+Tout se joue dans **une seule interface**, <http://localhost:3100>.
 
-**Compte #0 (serveur)**
+**Dans le jeu** (compte joueur connecté dans MetaMask)
 
-1. *Ouvrir le tournoi* — mise à 100 INTEL, table de 4.
-2. *Envoyer un messager* — deux transactions : `commitCourier` (l'empreinte) puis
-   `registerCourier` (3 unités de carburant). L'index réel s'affiche localement,
-   pour montrer qu'il n'a pas été publié.
+1. Ouvrez un lobby, lancez la partie, puis *dispatch*. Le messager n'apparaît
+   qu'une fois son engagement confirmé on-chain.
+2. À 54 % du trajet il passe **PANNE** et se fige — toujours attaquable.
+3. Panneau *fuel* à droite → *+1*. MetaMask demande une signature de 0.001 ETH
+   et le messager repart. La facture restante n'est jamais affichée.
 
-**Compte #1 (joueur, propriétaire du messager)**
+**Page /chain** (lien « audit », aucune signature requise)
 
-3. *Approuver* puis *Miser et rejoindre* — le double appel ERC-20. MetaMask
-   demande deux signatures : c'est le fonctionnement normal d'une allocation.
-4. Au bout de 15 s la barre passe au rouge : **EN PANNE**. Le messager est figé,
-   toujours attaquable. *Booster +1 unité* → transaction de 0.001 ETH, il repart.
-   La prime de gaz du match augmente d'autant.
+4. Chaque messager résolu affiche l'empreinte stockée **et** celle recalculée
+   dans votre navigateur, plus la vérification de la facture de carburant.
+   Ouvrez-la depuis un autre compte pour montrer qu'aucun privilège n'est requis.
 
-**Retour au compte #0**
-
-5. *Tricher : annoncer un autre index* → **rejeté** avec `BadCommitment`.
-   Le mensonge n'est pas inscriptible.
-6. *Révéler honnêtement* → accepté, statut *Révélé et prouvé*.
-7. *Verser le pot INTEL* puis *Verser la prime de gaz ETH* → le vainqueur
-   encaisse les deux. Les soldes se mettent à jour dans l'en-tête.
-
-Le journal en bas de page enregistre chaque transaction avec son gaz consommé.
-
-### Sans MetaMask, pour répéter
+### En console, pour répéter
 
 ```bash
-npx hardhat run scripts/demo-cheat.js      --network localhost   # commit/reveal seul
-npx hardhat run scripts/simulate-match.js  --network localhost   # la partie entière
+cd chain
+npx hardhat run scripts/demo-cheat.js     --network localhost   # commit/reveal + triche rejetée
+npx hardhat run scripts/simulate-match.js --network localhost   # partie entière + bilan de gaz
 ```
 
-`simulate-match.js` joue un match complet — mises, engagements, pannes, boosters,
-tentative de triche, révélations, règlement — et termine par un bilan des
-transactions et du gaz, réparti par signataire. Mesuré : **27 transactions,
-2 352 257 de gaz** pour 3 messagers et 4 joueurs.
+Et contre un jeu lancé :
 
----
+```bash
+node scripts/chain-playtest.mjs    # ancrage → panne → booster → reprise
+node scripts/stall-balance.mjs     # coût d'une panne sous attaque
+```
 
 ## 7. Où cela se branche dans le jeu
 

@@ -114,6 +114,9 @@ export default function LobbyClient({
         <Link href="/leaderboard" className="btn-ghost flex-1 py-2.5">
           ranks
         </Link>
+        <Link href="/chain" className="btn-ghost flex-1 py-2.5">
+          audit
+        </Link>
         {isAdmin && (
           <Link href="/admin" className="btn-ghost flex-1 py-2.5">
             admin

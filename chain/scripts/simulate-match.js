@@ -67,7 +67,7 @@ async function main() {
   const players = signers.slice(1, 5);
   const names = ["Nord", "Est", "Sud", "Ouest"];
 
-  console.log("═══ DÉPLOIEMENT ═══\n");
+  console.log("=== DEPLOYMENT ===\n");
   const token = await (await ethers.getContractFactory("IntelToken")).deploy(server.address);
   const registry = await (await ethers.getContractFactory("CommitRevealRegistry")).deploy(server.address);
   const fuel = await (await ethers.getContractFactory("CourierFuel")).deploy(server.address);
@@ -77,13 +77,13 @@ async function main() {
     server.address,
   );
   for (const c of [token, registry, fuel, matches, escrow]) await c.waitForDeployment();
-  console.log("  5 contrats déployés\n");
+  console.log("  5 contracts deployed\n");
 
   const matchId = ethers.id("SIM-" + Date.now());
 
   // ── 1. Buy-in ──────────────────────────────────────────────────────────
-  console.log("═══ 1 · MISE DES JOUEURS (ERC-20) ═══\n");
-  await tx("createTournament", "serveur", escrow.createTournament(matchId, STAKE, 4, 3600, 3600));
+  console.log("=== 1. PLAYERS STAKE (ERC-20) ===\n");
+  await tx("createTournament", "server", escrow.createTournament(matchId, STAKE, 4, 3600, 3600));
 
   for (let i = 0; i < players.length; i++) {
     const p = players[i];
@@ -94,10 +94,10 @@ async function main() {
   }
 
   const t = await escrow.getTournament(matchId);
-  console.log(`\n  Pot : ${fmt(t.pot)} INTEL · table verrouillée automatiquement (4/4)\n`);
+  console.log(`\n  Pot: ${fmt(t.pot)} INTEL - table locked automatically (4/4)\n`);
 
   // ── 2. The match: dispatch, stall, boost, reveal ───────────────────────
-  console.log("═══ 2 · LA PARTIE : ENGAGEMENT, PANNE, BOOST, RÉVÉLATION ═══\n");
+  console.log("=== 2. THE MATCH: COMMIT, STALL, BOOST, REVEAL ===\n");
 
   const secrets = [];
   for (let i = 0; i < 3; i++) {
@@ -109,18 +109,18 @@ async function main() {
 
     const required = requiredUnitsOf(matchId, courierId, keyIndex, nonce);
 
-    console.log(`  — Messager ${i + 1} (${names[i]}), clé réelle ${keyIndex} gardée secrète`);
+    console.log(`  - Courier ${i + 1} (${names[i]}), real key ${keyIndex} kept secret`);
     await tx(
       "commitCourier",
-      "serveur",
+      "server",
       registry.commitCourier(matchId, courierId, commitmentOf(matchId, courierId, keyIndex, nonce), CANDIDATES, 3600),
     );
     await tx(
-      `registerCourier (${FUEL_AT_DISPATCH} au départ)`,
-      "serveur",
+      `registerCourier (${FUEL_AT_DISPATCH} at dispatch)`,
+      "server",
       fuel.registerCourier(matchId, courierId, owner.address, FUEL_AT_DISPATCH, required),
     );
-    console.log(`    ↳ facture cachée : ${required} unités — ${names[i]} l'ignore`);
+    console.log(`    -> hidden bill: ${required} units - ${names[i]} cannot see it`);
 
     // The courier freezes and stays frozen until the full bill is paid. The
     // player pays blind, in capped chunks, discovering the cost as they go.
@@ -134,39 +134,39 @@ async function main() {
       spent += value;
       clicks++;
       owed = Number(await fuel.unitsOutstanding(matchId, courierId));
-      console.log(`    ↳ booster ${clicks} : ${fmt(value)} ETH, reste ${owed} unité(s)`);
+      console.log(`    -> booster ${clicks}: ${fmt(value)} ETH, ${owed} unit(s) still owed`);
     }
-    console.log(`    ↳ reparti après ${clicks} booster(s), ${fmt(spent)} ETH dépensés\n`);
+    console.log(`    -> moving again after ${clicks} booster(s), ${fmt(spent)} ETH spent\n`);
   }
 
   // ── 3. A cheating reveal is refused ────────────────────────────────────
-  console.log("═══ 3 · TENTATIVE DE TRICHE ═══\n");
+  console.log("=== 3. CHEAT ATTEMPT ===\n");
   const victim = secrets[0];
   const wrong = (victim.keyIndex + 3) % CANDIDATES;
-  console.log(`  Le serveur tente d'annoncer ${wrong} au lieu de ${victim.keyIndex}…`);
+  console.log(`  The server tries to claim ${wrong} instead of ${victim.keyIndex}...`);
   try {
     await registry.revealCourier(matchId, victim.courierId, wrong, victim.nonce);
-    console.log("  ÉCHEC DU TEST : la triche est passée !\n");
+    console.log("  TEST FAILED: the cheat went through!\n");
   } catch (e) {
     let name = e.shortMessage || e.message;
     const data = e?.data ?? e?.info?.error?.data ?? null;
     if (typeof data === "string") {
       try { name = registry.interface.parseError(data).name; } catch (_) {}
     }
-    console.log(`  rejeté : ${name} — l'empreinte ne correspond pas.`);
-    console.log("  La transaction échoue, donc le mensonge n'est jamais inscrit.\n");
+    console.log(`  rejected: ${name} - the hash does not match.`);
+    console.log("  The transaction fails, so the lie is never recorded.\n");
   }
 
   // ── 4. Honest reveals ──────────────────────────────────────────────────
-  console.log("═══ 4 · RÉVÉLATIONS HONNÊTES ═══\n");
+  console.log("=== 4. HONEST REVEALS ===\n");
   for (const s of secrets) {
-    await tx("revealCourier", "serveur", registry.revealCourier(matchId, s.courierId, s.keyIndex, s.nonce));
-    await tx("markLanded", "serveur", fuel.markLanded(matchId, s.courierId));
+    await tx("revealCourier", "server", registry.revealCourier(matchId, s.courierId, s.keyIndex, s.nonce));
+    await tx("markLanded", "server", fuel.markLanded(matchId, s.courierId));
   }
-  console.log(`\n  Engagés : ${await registry.committedCount(matchId)} · Révélés : ${await registry.revealedCount(matchId)}\n`);
+  console.log(`\n  Committed: ${await registry.committedCount(matchId)} - Revealed: ${await registry.revealedCount(matchId)}\n`);
 
   // ── 5. Settlement ──────────────────────────────────────────────────────
-  console.log("═══ 5 · RÈGLEMENT ═══\n");
+  console.log("=== 5. SETTLEMENT ===\n");
   const winner = players[0];
   const winnerName = names[0];
 
@@ -174,39 +174,39 @@ async function main() {
   const ethBefore = await ethers.provider.getBalance(winner.address);
   const bounty = await fuel.bounty(matchId);
 
-  await tx("finalizeMatch", "serveur", matches.finalizeMatch(matchId, 0, 0, 480, [
+  await tx("finalizeMatch", "server", matches.finalizeMatch(matchId, 0, 0, 480, [
     { player: players[0].address, slot: 0, directivesConfirmed: 5, cracksMade: 3, finalIntel: 210 },
     { player: players[1].address, slot: 1, directivesConfirmed: 3, cracksMade: 4, finalIntel: 150 },
     { player: players[2].address, slot: 2, directivesConfirmed: 2, cracksMade: 1, finalIntel: 90 },
     { player: players[3].address, slot: 3, directivesConfirmed: 1, cracksMade: 2, finalIntel: 60 },
   ]));
-  await tx("settle (pot INTEL -> vainqueur)", "serveur", escrow.settle(matchId, winner.address));
-  await tx("payBounty (gaz ETH -> vainqueur)", "serveur", fuel.payBounty(matchId, winner.address));
+  await tx("settle (INTEL pot -> winner)", "server", escrow.settle(matchId, winner.address));
+  await tx("payBounty (ETH gas bounty -> winner)", "server", fuel.payBounty(matchId, winner.address));
 
   const intelAfter = await token.balanceOf(winner.address);
   const ethAfter = await ethers.provider.getBalance(winner.address);
 
   console.log("");
-  console.log(`  Vainqueur : ${winnerName} (${winner.address.slice(0, 12)}…)`);
-  console.log(`  INTEL : ${fmt(intelBefore)} → ${fmt(intelAfter)}  (+${fmt(intelAfter - intelBefore)})`);
-  console.log(`  ETH   : ${fmt(ethBefore)} → ${fmt(ethAfter)}  (prime de gaz +${fmt(bounty)})`);
-  console.log(`  Palmarès on-chain : ${await matches.wins(winner.address)} victoire(s), ${await matches.totalCracks(winner.address)} décryptages`);
+  console.log(`  Winner: ${winnerName} (${winner.address.slice(0, 12)}...)`);
+  console.log(`  INTEL: ${fmt(intelBefore)} -> ${fmt(intelAfter)}  (+${fmt(intelAfter - intelBefore)})`);
+  console.log(`  ETH  : ${fmt(ethBefore)} -> ${fmt(ethAfter)}  (gas bounty +${fmt(bounty)})`);
+  console.log(`  On-chain record: ${await matches.wins(winner.address)} win(s), ${await matches.totalCracks(winner.address)} cracks`);
 
   // ── Ledger ─────────────────────────────────────────────────────────────
-  console.log("\n═══ BILAN ═══\n");
+  console.log("\n=== SUMMARY ===\n");
   const byWho = {};
   for (const l of ledger) {
     byWho[l.who] = (byWho[l.who] ?? 0n) + l.gas;
   }
-  console.log(`  Transactions : ${ledger.length}`);
-  console.log(`  Gaz total    : ${gasTotal.toString()}`);
+  console.log(`  Transactions: ${ledger.length}`);
+  console.log(`  Total gas   : ${gasTotal.toString()}`);
   for (const [who, gas] of Object.entries(byWho)) {
     console.log(`    ${who.padEnd(10)} ${gas.toString().padStart(8)}`);
   }
   const perMatch = ledger.length;
-  console.log(`\n  Pour une partie complète (5 directives × 4 joueurs + boosts),`);
-  console.log(`  comptez environ ${perMatch * 3}–${perMatch * 4} transactions.`);
-  console.log("  Gratuit en local ; en production il faudrait regrouper ou passer sur un L2.");
+  console.log(`\n  For a full match (5 directives x 4 players + boosters),`);
+  console.log(`  expect roughly ${perMatch * 3}-${perMatch * 4} transactions.`);
+  console.log("  Free locally; in production you would batch these or move to an L2.");
 }
 
 main().catch((e) => {

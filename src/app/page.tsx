@@ -31,7 +31,7 @@ export default async function Home() {
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col px-5 py-10 sm:px-8">
       <header className="flex items-center justify-between gap-4">
         <div className="font-mono text-[11px] uppercase tracking-[0.4em] text-slate-300">
-          Dossier / classifié
+          Dossier / classified
         </div>
         <nav className="flex items-center gap-2">
           <Link href="/leaderboard" className="btn-ghost">

@@ -29,7 +29,7 @@ const FUEL_ABI = [
 const CR_ABI = ["function statusOf(bytes32 matchId, bytes32 courierId) view returns (uint8)"];
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-const STATUS = ["Inconnu", "Engagé", "Révélé et prouvé", "Défaillant"];
+const STATUS = ["Unknown", "Committed", "Revealed and proven", "Defaulted"];
 
 async function login(username) {
   const res = await fetch(`${BASE}/api/auth/login`, {
@@ -84,7 +84,7 @@ async function main() {
 
   if (sa?.status !== "ACTIVE") throw new Error("match did not start");
   if (!sa.chain) throw new Error("server reports no chain — are the CHAIN_* vars set?");
-  console.log(`chain actif · matchIdHex ${sa.chain.matchIdHex.slice(0, 18)}…`);
+  console.log(`chain active - matchIdHex ${sa.chain.matchIdHex.slice(0, 18)}...`);
   console.log(`fuel contract ${sa.chain.courierFuelAddress}\n`);
 
   const fuel = new Contract(sa.chain.courierFuelAddress, FUEL_ABI, wallets[0]);
@@ -95,7 +95,7 @@ async function main() {
   );
 
   // ── Dispatch: must anchor before the courier appears in play ───────────
-  console.log("1) A dispatche — attente de l'ancrage on-chain…");
+  console.log("1) A dispatches - waiting for the on-chain anchor...");
   a.emit("dispatch");
   let courier = null;
   for (let i = 0; i < 40 && !courier; i++) {
@@ -103,14 +103,15 @@ async function main() {
     courier = sa.messengers.find((m) => m.ownerSlot === 0 && m.kind === "DIRECTIVE");
   }
   if (!courier) throw new Error("courier never appeared — anchoring failed");
-  console.log(`   ${courier.codename} en vol, courierIdHex ${courier.courierIdHex?.slice(0, 18)}…`);
+  console.log(`   ${courier.codename} in flight, courierIdHex ${courier.courierIdHex?.slice(0, 18)}...`);
 
   const onChain = await fuel.getCourier(sa.chain.matchIdHex, courier.courierIdHex);
-  console.log(`   on-chain : ${onChain.unitsAtDispatch} au départ, facture ${onChain.requiredUnits}`);
-  console.log(`   (le joueur ne voit PAS la facture dans l'état du jeu)\n`);
+  console.log(`   on-chain: ${onChain.unitsAtDispatch} units at dispatch, bill ${onChain.requiredUnits}`);
+  console.log(`   (the player does NOT see the bill in the game state)
+`);
 
   // ── Stall ─────────────────────────────────────────────────────────────
-  console.log("2) Attente de la panne sèche…");
+  console.log("2) Waiting for it to run dry...");
   let stalledAt = null;
   for (let i = 0; i < 60; i++) {
     await wait(500);
@@ -118,7 +119,7 @@ async function main() {
     if (!m) break;
     if (m.stalled) {
       stalledAt = m.progress;
-      console.log(`   EN PANNE à ${Math.round(m.progress * 100)}% du trajet`);
+      console.log(`   STALLED at ${Math.round(m.progress * 100)}% of the route`);
       break;
     }
   }
@@ -128,7 +129,7 @@ async function main() {
   const p1 = sa.messengers.find((x) => x.id === courier.id)?.progress;
   await wait(3000);
   const p2 = sa.messengers.find((x) => x.id === courier.id)?.progress;
-  console.log(`   progression figée : ${Math.round(p1 * 100)}% → ${Math.round(p2 * 100)}% après 3 s`);
+  console.log(`   progress frozen: ${Math.round(p1 * 100)}% -> ${Math.round(p2 * 100)}% after 3s`);
   if (Math.abs(p2 - p1) > 0.01) throw new Error("a stalled courier is still moving");
 
   // ── Boost from the player's own wallet ────────────────────────────────
@@ -142,30 +143,29 @@ async function main() {
     const tx = await fuel.boost(sa.chain.matchIdHex, courier.courierIdHex, { value });
     await tx.wait();
     boosts++;
-    console.log(`   booster ${boosts} : +${units} unités`);
+    console.log(`   booster ${boosts}: +${units} units`);
     await wait(2500); // give the server time to see the event
   }
 
   const resumed = sa.messengers.find((x) => x.id === courier.id);
-  console.log(`   état du jeu : ${resumed?.stalled ? "TOUJOURS EN PANNE" : "reparti"} · ${resumed?.boostCount ?? 0} booster(s) comptés`);
+  console.log(`   game state: ${resumed?.stalled ? "STILL STALLED" : "moving again"} - ${resumed?.boostCount ?? 0} booster(s) counted`);
   if (resumed?.stalled) throw new Error("boost did not clear the stall");
 
-  // ── Arrival + reveal ──────────────────────────────────────────────────
-  console.log("\n4) Attente de l'arrivée et de la révélation…");
+  console.log("\n4) Waiting for arrival and reveal...");
   for (let i = 0; i < 80; i++) {
     await wait(500);
     const still = sa.messengers.find((x) => x.id === courier.id);
     if (!still || still.progress >= 1) break;
   }
   const playerA = sa.players.find((p) => p.slot === 0);
-  console.log(`   étape de A : ${playerA.step}/5`);
+  console.log(`   A's step: ${playerA.step}/5`);
 
   await wait(2500); // reveal is fire-and-forget
   try {
     const st = Number(await registry.statusOf(sa.chain.matchIdHex, courier.courierIdHex));
-    console.log(`   statut on-chain : ${STATUS[st]}`);
+    console.log(`   on-chain status: ${STATUS[st]}`);
   } catch {
-    console.log("   (statut non lisible — CHAIN_COMMIT_REVEAL_ADDRESS non fourni au script)");
+    console.log("   (status unreadable - CHAIN_COMMIT_REVEAL_ADDRESS not passed to the script)");
   }
 
   console.log("\nOK — ancrage, panne, booster et reprise fonctionnent de bout en bout.");

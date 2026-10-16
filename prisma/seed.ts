@@ -17,9 +17,9 @@ const OPERATIONS: {
   dossier: string[];
 }[] = [
   {
-    name: "OPÉRATION PALIMPSESTE",
+    name: "OPERATION PALIMPSEST",
     description: "Rewrite a rival's archive before anyone notices the original.",
-    codenames: ["VÉLIN", "ENCRE", "RATURE", "COPISTE", "AUTHENTIQUE"],
+    codenames: ["VELLUM", "INKWELL", "ERASURE", "SCRIBE", "GENUINE"],
     dossier: [
       "A forger has been placed inside the national archive.",
       "The original ledger pages were removed on a Tuesday.",
@@ -29,9 +29,9 @@ const OPERATIONS: {
     ],
   },
   {
-    name: "OPÉRATION MERIDIAN",
+    name: "OPERATION MERIDIAN",
     description: "Move a listening post under a neutral flag.",
-    codenames: ["SEXTANT", "DÉRIVE", "PAVILLON", "MOUILLAGE", "ÉCOUTE"],
+    codenames: ["SEXTANT", "DRIFT", "ENSIGN", "ANCHORAGE", "LISTENING"],
     dossier: [
       "A survey vessel was chartered through a shipping shell.",
       "The hull was refitted with a passive array in dry dock.",
@@ -41,9 +41,9 @@ const OPERATIONS: {
     ],
   },
   {
-    name: "OPÉRATION LANTERNE",
+    name: "OPERATION LANTERN",
     description: "Turn a rival's own courier network into a broadcast channel.",
-    codenames: ["MÈCHE", "VERRE", "HUILE", "REFLET", "PHARE"],
+    codenames: ["WICK", "GLASS", "OIL", "REFLECTION", "BEACON"],
     dossier: [
       "A junior courier accepted a second salary.",
       "The courier's route was altered by four blocks.",
@@ -53,9 +53,9 @@ const OPERATIONS: {
     ],
   },
   {
-    name: "OPÉRATION OBSIDIENNE",
+    name: "OPERATION OBSIDIAN",
     description: "Retire an asset without a body, a file, or a question.",
-    codenames: ["FUMÉE", "MIROIR", "CENDRE", "ABSENCE", "OUBLI"],
+    codenames: ["SMOKE", "MIRROR", "ASH", "ABSENCE", "OBLIVION"],
     dossier: [
       "The asset was told their extraction had been approved.",
       "A safe house was prepared with no exit on the north side.",
@@ -65,9 +65,9 @@ const OPERATIONS: {
     ],
   },
   {
-    name: "OPÉRATION VERROU",
+    name: "OPERATION DEADBOLT",
     description: "Seize the cipher schedule for the coming quarter.",
-    codenames: ["GOUPILLE", "PÊNE", "GÂCHE", "CYLINDRE", "CLÉ"],
+    codenames: ["PIN", "BOLT", "STRIKE", "CYLINDER", "KEY"],
     dossier: [
       "The rotation schedule is printed in a single bound copy.",
       "A cleaner was given a camera the size of a button.",
@@ -77,9 +77,9 @@ const OPERATIONS: {
     ],
   },
   {
-    name: "OPÉRATION ARDOISE",
+    name: "OPERATION SLATE",
     description: "Erase a debt that three governments insist is real.",
-    codenames: ["CRAIE", "TRAIT", "ÉPONGE", "SURFACE", "NEUF"],
+    codenames: ["CHALK", "STROKE", "SPONGE", "SURFACE", "BLANK"],
     dossier: [
       "The debt instrument exists in four physical copies.",
       "Two copies were destroyed in an unremarkable fire.",

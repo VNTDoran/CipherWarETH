@@ -46,10 +46,10 @@ export default function BoostPanel({
   if (!wallet.available) {
     return (
       <div className="panel p-3">
-        <span className="stat">carburant</span>
+        <span className="stat">fuel</span>
         <p className="mt-1 text-xs leading-relaxed text-slate-300">
-          Aucun portefeuille détecté. Installez MetaMask pour ravitailler vos
-          messagers — la partie reste jouable sans.
+          No wallet detected. Install MetaMask to refuel your couriers — the match
+          stays playable without one.
         </p>
       </div>
     );
@@ -58,13 +58,18 @@ export default function BoostPanel({
   if (!wallet.address) {
     return (
       <div className="panel p-3">
-        <span className="stat">carburant</span>
-        <p className="mt-1 mb-2 text-xs leading-relaxed text-slate-300">
-          Vos messagers tombent en panne en cours de route. Connectez votre
-          portefeuille pour pouvoir les relancer.
+        <span className="stat">fuel</span>
+        <p className="mb-2 mt-1 text-xs leading-relaxed text-slate-300">
+          Your couriers run dry mid-flight. Connect a wallet so you can restart
+          them.
         </p>
-        <button type="button" className="btn-primary w-full py-2" onClick={onConnect} disabled={wallet.busy}>
-          {wallet.busy ? "connexion…" : "connecter le portefeuille"}
+        <button
+          type="button"
+          className="btn-primary w-full py-2"
+          onClick={onConnect}
+          disabled={wallet.busy}
+        >
+          {wallet.busy ? "connecting…" : "connect wallet"}
         </button>
       </div>
     );
@@ -72,7 +77,7 @@ export default function BoostPanel({
 
   async function boost(courierIdHex: string, units: number) {
     const err = await onBoost(courierIdHex, units);
-    setNote(err ?? `Booster de ${units} unité${units > 1 ? "s" : ""} envoyé.`);
+    setNote(err ?? `Sent a ${units}-unit booster.`);
   }
 
   const maxUnits = view.chain.maxUnitsPerBoost;
@@ -80,7 +85,7 @@ export default function BoostPanel({
   return (
     <div className={clsx("panel p-3", stalled.length > 0 && "border-alert/60")}>
       <div className="flex items-center justify-between">
-        <span className="stat">carburant</span>
+        <span className="stat">fuel</span>
         <span className="font-mono text-[10px] text-slate-300">
           {wallet.address.slice(0, 6)}…{wallet.address.slice(-4)}
         </span>
@@ -88,12 +93,12 @@ export default function BoostPanel({
 
       {wallet.wrongNetwork && (
         <p className="mt-2 rounded border border-alert/40 bg-alert/10 px-2 py-1 font-mono text-[10px] text-alert">
-          Mauvais réseau — basculez sur la chaîne {view.chain.chainId} dans MetaMask.
+          Wrong network — switch MetaMask to chain {view.chain.chainId}.
         </p>
       )}
 
       {mine.length === 0 && (
-        <p className="mt-2 text-xs text-slate-300">Aucun messager en vol.</p>
+        <p className="mt-2 text-xs text-slate-300">No courier in flight.</p>
       )}
 
       {mine.map((m) => (
@@ -108,20 +113,22 @@ export default function BoostPanel({
                 m.stalled ? "animate-flicker text-alert" : "text-signal",
               )}
             >
-              {m.stalled ? "en panne" : "en vol"}
+              {m.stalled ? "stalled" : "in flight"}
             </span>
           </div>
 
           <div className="mt-1 flex items-center justify-between font-mono text-[10px] text-slate-300">
-            <span>{Math.round(m.progress * 100)}% du trajet</span>
-            <span>{m.boostCount} booster{m.boostCount === 1 ? "" : "s"}</span>
+            <span>{Math.round(m.progress * 100)}% of route</span>
+            <span>
+              {m.boostCount} booster{m.boostCount === 1 ? "" : "s"}
+            </span>
           </div>
 
           {m.stalled && (
             <>
               <p className="mt-1.5 text-[11px] leading-snug text-slate-300">
-                Immobilisé et toujours attaquable. La facture restante est inconnue —
-                payez jusqu'à ce qu'il reparte.
+                Frozen, and still attackable. You cannot see what it owes — keep
+                paying until it moves.
               </p>
               <div className="mt-1.5 flex gap-1.5">
                 {[1, 3, maxUnits].map((u, i, arr) =>
@@ -143,9 +150,7 @@ export default function BoostPanel({
         </div>
       ))}
 
-      {note && (
-        <p className="mt-2 font-mono text-[10px] leading-snug text-slate-300">{note}</p>
-      )}
+      {note && <p className="mt-2 font-mono text-[10px] leading-snug text-slate-300">{note}</p>}
     </div>
   );
 }

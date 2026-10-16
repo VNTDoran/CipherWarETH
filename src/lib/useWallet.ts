@@ -80,7 +80,7 @@ export function useWallet(
       setState((s) => ({
         ...s,
         busy: false,
-        error: (e as { message?: string })?.message ?? "Connexion refusée",
+        error: (e as { message?: string })?.message ?? "Connection refused",
       }));
     }
   }, [chainCfg, syncAccount]);
@@ -126,7 +126,7 @@ export function useWallet(
         return null;
       } catch (e) {
         const err = e as { reason?: string; shortMessage?: string; message?: string };
-        const reason = err.reason ?? err.shortMessage ?? err.message ?? "Transaction refusée";
+        const reason = err.reason ?? err.shortMessage ?? err.message ?? "Transaction refused";
         setState((s) => ({ ...s, busy: false, error: reason }));
         return reason;
       }
