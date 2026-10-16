@@ -1,0 +1,22 @@
+{
+  "name": "cipherchain",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Verifiable key draw for Cipher War — commit/reveal on-chain",
+  "scripts": {
+    "node": "hardhat node",
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy": "hardhat run scripts/deploy.js --network localhost",
+    "demo": "hardhat run scripts/demo-cheat.js --network localhost",
+    "serve": "http-server public -p 8080 -c-1"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.0"
+  },
+  "dependencies": {
+    "ethers": "^6.17.0",
+    "http-server": "^14.1.1"
+  }
+}

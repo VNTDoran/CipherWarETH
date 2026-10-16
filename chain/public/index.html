@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CipherChain — tirage vérifiable</title>
+<style>
+  body{font-family:system-ui,sans-serif;max-width:780px;margin:2rem auto;padding:0 1rem;
+       background:#0e1420;color:#e8edf5;line-height:1.55}
+  h1{margin:0 0 .2rem;font-size:1.5rem}
+  h2{font-size:1rem;text-transform:uppercase;letter-spacing:.12em;color:#8fa3bf;
+     margin:1.8rem 0 .6rem;border-bottom:1px solid #2a3850;padding-bottom:.3rem}
+  .sub{color:#8fa3bf;margin:0 0 1.2rem;font-size:.92rem}
+  button{background:#1a2233;color:#e8edf5;border:1px solid #3a4a68;border-radius:6px;
+         padding:.5rem .9rem;margin:.15rem .15rem .15rem 0;cursor:pointer;font-size:.88rem}
+  button:hover:enabled{border-color:#5df095;background:#22304a}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.danger{border-color:#ff8b95;color:#ff8b95}
+  button.primary{border-color:#5df095;color:#5df095}
+  code{font-family:ui-monospace,Consolas,monospace;font-size:.82em;color:#9fd9ff;word-break:break-all}
+  .card{background:#1a2233;border:1px solid #2a3850;border-radius:8px;padding:.9rem 1rem;margin:.6rem 0}
+  .row{display:flex;justify-content:space-between;gap:1rem;padding:.25rem 0;font-size:.9rem}
+  .row b{color:#8fa3bf;font-weight:500}
+  #status{padding:.7rem .9rem;border-radius:6px;border:1px solid #2a3850;background:#1a2233;
+          font-size:.88rem;min-height:1.2em;margin-top:1rem}
+  #status.ok{border-color:#5df095;color:#5df095}
+  #status.bad{border-color:#ff8b95;color:#ff8b95}
+  .hint{color:#7d8fa8;font-size:.82rem;margin:.3rem 0 0}
+</style>
+</head>
+<body>
+<h1>CipherChain</h1>
+<p class="sub">Tirage de clé vérifiable pour Cipher War — engagement / révélation sur Hardhat local.</p>
+
+<button id="connect" class="primary">Connecter MetaMask</button>
+<div class="card">
+  <div class="row"><b>Compte connecté</b><code id="account">-</code></div>
+  <div class="row"><b>Rôle</b><span id="role">-</span></div>
+  <div class="row"><b>Contrat</b><code id="contract">-</code></div>
+</div>
+
+<h2>1 · Le serveur engage la clé (commit)</h2>
+<p class="hint">Le serveur tire un index secret (0-9) et un nonce aléatoire, puis publie
+   <em>uniquement</em> leur empreinte. L'index reste dans le navigateur : rien ne le révèle on-chain.</p>
+<button id="dispatch">Envoyer un messager (commit)</button>
+<div class="card">
+  <div class="row"><b>Courier ID</b><code id="courierId">-</code></div>
+  <div class="row"><b>Empreinte publiée</b><code id="commitment">-</code></div>
+  <div class="row"><b>Index réel (secret, local)</b><code id="secretIndex">-</code></div>
+  <div class="row"><b>Nonce (secret, local)</b><code id="secretNonce">-</code></div>
+  <div class="row"><b>État on-chain</b><span id="chainStatus">-</span></div>
+</div>
+
+<h2>2 · La partie se joue hors chaîne</h2>
+<p class="hint">Les joueurs attaquent le messager et éliminent des clés candidates.
+   Le serveur ne peut plus changer sa réponse : elle est déjà figée dans l'empreinte.</p>
+
+<h2>3 · Le serveur révèle</h2>
+<button id="revealHonest" class="primary">Révéler honnêtement</button>
+<button id="revealCheat" class="danger">Tricher : annoncer un autre index</button>
+<p class="hint">La triche est rejetée par le contrat lui-même : la transaction échoue,
+   donc le mensonge ne peut même pas être enregistré.</p>
+
+<h2>4 · Vérification publique</h2>
+<p class="hint">N'importe qui, sans aucun privilège, peut recalculer l'empreinte et la comparer.</p>
+<button id="verify">Vérifier ce messager</button>
+<div class="card">
+  <div class="row"><b>Empreinte stockée</b><code id="vStored">-</code></div>
+  <div class="row"><b>Empreinte recalculée</b><code id="vRecomputed">-</code></div>
+  <div class="row"><b>Verdict</b><span id="vVerdict">-</span></div>
+</div>
+
+<div id="status">Connectez MetaMask pour commencer.</div>
+
+<script type="module">
+import { BrowserProvider, Contract, keccak256, solidityPacked, hexlify, randomBytes, id }
+  from "https://cdn.jsdelivr.net/npm/ethers@6.13.4/+esm";
+
+const $ = (x) => document.getElementById(x);
+const info = await (await fetch("cipherchain-info.json")).json();
+const STATUS = ["Inconnu", "Engagé (en vol)", "Révélé et prouvé", "Défaillant (jamais révélé)"];
+
+let provider, contract, me;
+// The "server's secret": held only in this page, exactly as the game server
+// holds it in memory. Nothing reaches the chain until the reveal.
+let current = null;
+
+const MATCH_ID = id("DEMO-MATCH-" + Date.now());
+const CANDIDATES = 10;
+const WINDOW = 600;
+
+function commitmentOf(matchId, courierId, keyIndex, nonce) {
+  return keccak256(solidityPacked(
+    ["bytes32", "bytes32", "uint8", "bytes32"],
+    [matchId, courierId, keyIndex, nonce],
+  ));
+}
+
+function say(msg, cls) {
+  $("status").className = cls || "";
+  $("status").textContent = msg;
+}
+
+const ERROR_FR = {
+  BadCommitment: "l'empreinte ne correspond pas au couple (index, nonce) annoncé",
+  NotGameServer: "seul le serveur de jeu peut engager ou révéler",
+  AlreadyCommitted: "ce messager a déjà un engagement",
+  NotCommitted: "aucun engagement pour ce messager",
+  AlreadyRevealed: "déjà révélé",
+  RevealWindowClosed: "délai de révélation dépassé",
+  IndexOutOfRange: "index hors du nombre de clés candidates",
+  InvalidWindow: "fenêtre de révélation invalide",
+};
+
+/**
+ * MetaMask often surfaces a custom error as a raw selector (e.g. 0xc38b437f).
+ * The ABI knows the name, so decode it rather than showing hex to the user.
+ */
+function decodeRevert(e) {
+  const data = (e && (e.data || (e.info && e.info.error && e.info.error.data)
+    || (e.error && e.error.data) || (e.revert && e.revert.data))) || null;
+  if (typeof data === "string" && data.length >= 10 && contract) {
+    try {
+      const parsed = contract.interface.parseError(data);
+      if (parsed) return parsed.name + " — " + (ERROR_FR[parsed.name] || "");
+    } catch (_) { /* fall through */ }
+  }
+  if (e && e.revert && e.revert.name) {
+    return e.revert.name + " — " + (ERROR_FR[e.revert.name] || "");
+  }
+  return (e && (e.reason || e.shortMessage || e.message)) || "erreur inconnue";
+}
+
+$("connect").onclick = async () => {
+  if (!window.ethereum) return say("MetaMask introuvable", "bad");
+  provider = new BrowserProvider(window.ethereum);
+  await provider.send("eth_requestAccounts", []);
+  const signer = await provider.getSigner();
+  me = await signer.getAddress();
+  contract = new Contract(info.commitReveal.address, info.commitReveal.abi, signer);
+
+  $("account").textContent = me;
+  $("contract").textContent = info.commitReveal.address;
+  const isServer = me.toLowerCase() === info.gameServer.toLowerCase();
+  $("role").textContent = isServer
+    ? "serveur de jeu (peut engager et révéler)"
+    : "joueur / observateur (lecture seule)";
+  say(isServer
+    ? "Connecté en tant que serveur. Envoyez un messager."
+    : "Connecté en observateur : vous pouvez vérifier, mais pas engager.", "ok");
+};
+
+$("dispatch").onclick = async () => {
+  if (!contract) return say("Connectez MetaMask d'abord", "bad");
+  const courierId = id("COURIER-" + Date.now());
+  const keyIndex = Math.floor(Math.random() * CANDIDATES);
+  const nonce = hexlify(randomBytes(32));
+  const commitment = commitmentOf(MATCH_ID, courierId, keyIndex, nonce);
+
+  try {
+    say("Confirmez l'engagement dans MetaMask…");
+    const tx = await contract.commitCourier(MATCH_ID, courierId, commitment, CANDIDATES, WINDOW);
+    await tx.wait();
+    current = { courierId, keyIndex, nonce, commitment };
+    $("courierId").textContent = courierId;
+    $("commitment").textContent = commitment;
+    $("secretIndex").textContent = keyIndex + "  (non publié à ce stade)";
+    $("secretNonce").textContent = nonce;
+    $("vStored").textContent = "-";
+    $("vRecomputed").textContent = "-";
+    $("vVerdict").textContent = "-";
+    await refreshStatus();
+    say("Engagement publié. Le serveur ne peut plus changer la clé.", "ok");
+  } catch (e) {
+    say(e.reason || e.shortMessage || e.message, "bad");
+  }
+};
+
+async function reveal(index, label, cls) {
+  if (!current) return say("Envoyez d'abord un messager", "bad");
+  try {
+    say("Confirmez la révélation dans MetaMask…");
+    const tx = await contract.revealCourier(MATCH_ID, current.courierId, index, current.nonce);
+    await tx.wait();
+    await refreshStatus();
+    say(label + " — transaction confirmée.", cls);
+  } catch (e) {
+    await refreshStatus();
+    say("Rejeté par le contrat : " + decodeRevert(e)
+        + "  →  la triche ne peut même pas être enregistrée.", "bad");
+  }
+}
+
+$("revealHonest").onclick = () =>
+  reveal(current && current.keyIndex, "Révélation honnête acceptée", "ok");
+
+$("revealCheat").onclick = () => {
+  if (!current) return say("Envoyez d'abord un messager", "bad");
+  const wrong = (current.keyIndex + 1 + Math.floor(Math.random() * (CANDIDATES - 1))) % CANDIDATES;
+  say("Tentative de triche : le serveur annonce " + wrong + " au lieu de " + current.keyIndex + "…");
+  return reveal(wrong, "", "bad");
+};
+
+async function refreshStatus() {
+  if (!current) return;
+  const s = await contract.statusOf(MATCH_ID, current.courierId);
+  $("chainStatus").textContent = STATUS[Number(s)];
+}
+
+$("verify").onclick = async () => {
+  if (!current) return say("Envoyez d'abord un messager", "bad");
+  const c = await contract.getCourier(MATCH_ID, current.courierId);
+  $("vStored").textContent = c.commitment;
+
+  if (!c.revealed) {
+    $("vRecomputed").textContent = "—";
+    $("vVerdict").textContent =
+      "Pas encore révélé : impossible de vérifier, et c'est voulu — le messager est en vol.";
+    return say("Messager encore en vol.", "");
+  }
+
+  // Recomputed from the values the chain now holds — no trust in the server.
+  const recomputed = commitmentOf(MATCH_ID, current.courierId, Number(c.keyIndex), c.nonce);
+  $("vRecomputed").textContent = recomputed;
+  const proven = await contract.isProven(MATCH_ID, current.courierId);
+  const match = recomputed.toLowerCase() === c.commitment.toLowerCase();
+  $("vVerdict").textContent = (match && proven)
+    ? "Conforme — la clé réelle était bien l'index " + c.keyIndex + ", fixé avant la partie."
+    : "NON CONFORME — le serveur a triché.";
+  say(match ? "Vérification réussie." : "Vérification échouée.", match ? "ok" : "bad");
+};
+</script>
+</body>
+</html>

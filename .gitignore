@@ -7,3 +7,11 @@ out
 .env.local
 next-env.d.ts
 tsconfig.tsbuildinfo
+
+# chain workspace
+chain/node_modules
+chain/artifacts
+chain/cache
+chain/chain.env
+chain/public/cipherchain-info.json
+chain/*.log
