@@ -145,12 +145,14 @@ export function useMatch(code: string) {
       start: () => emit("start"),
       dispatch: () => emit("dispatch"),
       decoy: () => emit("decoy"),
+      forfeit: () => emit("forfeit"),
       buy: (item: ShopItem) => emit("buy", { item }),
       attack: (messengerId: string) => emit("attack", { messengerId }),
       submit: (s: MinigameSubmission) => emit("submit", s),
       commit: (messengerId: string, keyIndex: number) =>
         emit("commit", { messengerId, keyIndex }),
       linkWallet: (address: string | null) => emit("linkWallet", { address }),
+      checkStake: () => emit("checkStake"),
     },
   };
 }

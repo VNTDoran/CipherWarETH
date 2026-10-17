@@ -35,6 +35,27 @@ interface Row {
   boosts: number;
 }
 
+interface MatchRow {
+  matchId: string;
+  block: number;
+  stakers: string[];
+  locked: boolean;
+  /** Winner and payout, once the escrow settled. */
+  paidTo: string | null;
+  payoutWei: bigint | null;
+  /** Result anchored by MatchRegistry, or null if it never was. */
+  result: { winner: string; winType: number; seconds: number } | null;
+  committed: number;
+  revealed: number;
+}
+
+const WIN_TYPES = ["operation", "blackout", "time expired", "forfeit"];
+
+function intel(wei: bigint | null) {
+  if (wei === null) return "—";
+  return (wei / 10n ** 18n).toLocaleString("en-US");
+}
+
 function short(hex: string, n = 10) {
   return hex.length > n + 6 ? `${hex.slice(0, n)}…${hex.slice(-4)}` : hex;
 }
@@ -42,6 +63,7 @@ function short(hex: string, n = 10) {
 export default function AuditClient() {
   const [info, setInfo] = useState<ChainInfo | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
+  const [matchRows, setMatchRows] = useState<MatchRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -83,6 +105,59 @@ export default function AuditClient() {
         const id = String((b as { args: unknown[] }).args[1]).toLowerCase();
         boostsPer.set(id, (boostsPer.get(id) ?? 0) + 1);
       }
+
+      // ── Matches: stakes, result and payout, straight from the contracts ──
+      const byMatch = new Map<string, MatchRow>();
+      const row = (id: string): MatchRow => {
+        const key = id.toLowerCase();
+        let r = byMatch.get(key);
+        if (!r) {
+          r = { matchId: id, block: 0, stakers: [], locked: false, paidTo: null, payoutWei: null, result: null, committed: 0, revealed: 0 };
+          byMatch.set(key, r);
+        }
+        return r;
+      };
+      const escrowInfo = data.contracts.tournamentEscrow;
+      const registryInfo = data.contracts.matchRegistry;
+      if (escrowInfo) {
+        const escrow = new Contract(escrowInfo.address, escrowInfo.abi as never, provider);
+        type Ev = { args: Record<string, unknown> & unknown[]; blockNumber: number };
+        for (const e of (await escrow.queryFilter("TournamentCreated", from, head)) as unknown as Ev[]) {
+          row(String(e.args[0])).block = e.blockNumber;
+        }
+        for (const e of (await escrow.queryFilter("PlayerJoined", from, head)) as unknown as Ev[]) {
+          row(String(e.args[0])).stakers.push(String(e.args[1]));
+        }
+        for (const e of (await escrow.queryFilter("TournamentLocked", from, head)) as unknown as Ev[]) {
+          row(String(e.args[0])).locked = true;
+        }
+        for (const e of (await escrow.queryFilter("TournamentSettled", from, head)) as unknown as Ev[]) {
+          const r = row(String(e.args[0]));
+          r.paidTo = String(e.args[1]);
+          r.payoutWei = BigInt(e.args[2] as bigint);
+        }
+      }
+      if (registryInfo) {
+        const reg = new Contract(registryInfo.address, registryInfo.abi as never, provider);
+        type Ev = { args: unknown[]; blockNumber: number };
+        for (const e of (await reg.queryFilter("MatchFinalized", from, head)) as unknown as Ev[]) {
+          const r = row(String(e.args[0]));
+          r.block = r.block || e.blockNumber;
+          r.result = {
+            winner: String(e.args[1]),
+            winType: Number(e.args[3]),
+            seconds: Number(e.args[4]),
+          };
+        }
+      }
+      for (const ev of committed) {
+        row(String((ev as { args: unknown[] }).args[0])).committed++;
+      }
+      const revealedEvs = await cr.queryFilter("CourierRevealed", from, head);
+      for (const ev of revealedEvs) {
+        row(String((ev as { args: unknown[] }).args[0])).revealed++;
+      }
+      setMatchRows([...byMatch.values()].sort((a, b) => b.block - a.block).slice(0, 15));
 
       const out: Row[] = [];
       for (const ev of committed.slice(-25).reverse()) {
@@ -213,7 +288,70 @@ export default function AuditClient() {
         </p>
       )}
 
-      <div className="mt-5 flex items-center gap-4">
+      <h2 className="mt-8 font-display text-xl font-semibold text-slate-100">Matches</h2>
+      <p className="mt-1 max-w-prose text-sm text-slate-300">
+        Each match as the contracts recorded it: who staked, who won, how, and where the pot went.
+        A match with no couriers (for example one that ended in a forfeit before anyone dispatched)
+        appears here but has nothing in the courier list below.
+      </p>
+      {matchRows.length === 0 && !loading && (
+        <p className="panel mt-3 p-4 text-center text-sm text-slate-300">No matches recorded yet.</p>
+      )}
+      <div className="mt-3 space-y-2">
+        {matchRows.map((m) => (
+          <div
+            key={m.matchId}
+            className={clsx("panel p-3", m.paidTo && "border-signal/40")}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <code className="text-[11px]">{short(m.matchId, 14)}</code>
+              <span
+                className={clsx(
+                  "font-mono text-[10px] uppercase tracking-widest",
+                  m.result ? "text-signal" : m.locked ? "text-gold" : "text-slate-300",
+                )}
+              >
+                {m.result ? "finished" : m.locked ? "in progress or unsettled" : "lobby only"}
+              </span>
+            </div>
+            <div className="mt-2 grid gap-x-6 gap-y-1 text-[11px] sm:grid-cols-2">
+              <Field label="stakes in" value={String(m.stakers.length)} />
+              <Field label="couriers" value={`${m.revealed}/${m.committed} revealed`} />
+              <Field
+                label="result"
+                value={
+                  m.result
+                    ? `${WIN_TYPES[m.result.winType] ?? "unknown"} · ${m.result.seconds}s`
+                    : "not anchored"
+                }
+              />
+              <Field
+                label="pot paid"
+                value={m.paidTo ? `${intel(m.payoutWei)} INTEL` : "not paid"}
+              />
+            </div>
+            {(m.result || m.paidTo) && (
+              <div className="mt-2 font-mono text-[10px] text-slate-300">
+                <div className="flex gap-2">
+                  <span className="w-24 shrink-0 text-slate-400">winner</span>
+                  <code>{short(m.result?.winner ?? m.paidTo ?? "", 18)}</code>
+                </div>
+              </div>
+            )}
+            {m.stakers.length > 0 && (
+              <div className="mt-1 font-mono text-[10px] text-slate-300">
+                <div className="flex gap-2">
+                  <span className="w-24 shrink-0 text-slate-400">stakers</span>
+                  <span className="break-all">{m.stakers.map((a) => short(a, 8)).join(", ")}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <h2 className="mt-10 font-display text-xl font-semibold text-slate-100">Couriers</h2>
+      <div className="mt-2 flex items-center gap-4">
         <span className="stat">
           {rows.length} courier{rows.length === 1 ? "" : "s"} anchored
         </span>

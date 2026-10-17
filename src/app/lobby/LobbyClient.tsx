@@ -7,9 +7,12 @@ import { useState } from "react";
 export default function LobbyClient({
   displayName,
   isAdmin,
+  stakeIntel,
 }: {
   displayName: string;
   isAdmin: boolean;
+  /** Per-player buy-in in INTEL; 0 means matches are free. */
+  stakeIntel: number;
 }) {
   const router = useRouter();
   const [code, setCode] = useState("");
@@ -67,7 +70,28 @@ export default function LobbyClient({
         <h1 className="font-display text-3xl font-bold text-slate-100">{displayName}</h1>
       </div>
 
-      <div className="panel mt-8 p-5">
+      {stakeIntel > 0 && (
+        <div className="panel mt-8 border-gold/40 p-4">
+          <div className="flex items-center justify-between">
+            <span className="stat">tournament</span>
+            <span className="font-mono text-[10px] uppercase tracking-widest text-gold">
+              staked matches
+            </span>
+          </div>
+          <p className="mt-2 font-mono text-2xl font-bold text-slate-100">
+            {stakeIntel.toLocaleString("en-US")}{" "}
+            <span className="text-sm text-slate-300">INTEL buy-in</span>
+          </p>
+          <p className="mt-1 text-xs leading-relaxed text-slate-300">
+            Every match is a tournament: each player stakes INTEL from MetaMask, the winner takes
+            the whole pot, and forfeiting or losing leaves your stake with them. You stake inside
+            the lobby, after you open or join one. Needs MetaMask on the game network and enough
+            INTEL.
+          </p>
+        </div>
+      )}
+
+      <div className={`panel ${stakeIntel > 0 ? "mt-4" : "mt-8"} p-5`}>
         <h2 className="font-display text-lg font-semibold text-slate-100">Host a match</h2>
         <p className="mt-1 text-sm text-slate-300">
           You get a 6-character code. Up to three others join with it.

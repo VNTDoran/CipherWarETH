@@ -99,6 +99,8 @@ interface Player {
   decoysBaited: number;
   spent: number;
   connected: boolean;
+  /** Set when the player gives up mid-match; they stay on the board, inert. */
+  forfeited: boolean;
   ready: boolean;
   inTransit: boolean;
   burned: Set<number>;
@@ -202,11 +204,25 @@ export class Match {
   private log: LogEntry[] = [];
   /** Couriers already announced as stalled, so the log says it once. */
   private stalledNotified = new Set<string>();
+  /** Couriers already opened on-chain, so none is revealed twice. */
+  private revealedOnChain = new Set<string>();
   private lastAmbientAt = 0;
   private operations: OperationSpec[] = [];
   private tunings: MinigameTuning[] = DEFAULT_TUNING;
   /** Set by the room when persistence finishes, so we can attach row ids. */
   onFinish?: (m: Match) => void;
+  /** Lets non-socket events (a stake landing on-chain) push a fresh snapshot. */
+  onChange?: (m: Match) => void;
+
+  // ── Staking ───────────────────────────────────────────────────────────
+  /** True when this match is backed by an escrow tournament. */
+  stakingActive = false;
+  /** The escrow tournament exists on-chain, so stakes can be accepted. */
+  tournamentReady = false;
+  /** Lower-cased wallets known to have staked. Fed by the contract event. */
+  private staked = new Set<string>();
+  /** Set while the tournament is being locked on-chain, to stop a double start. */
+  starting = false;
 
   constructor(code: string, hostUserId: string) {
     this.code = code;
@@ -262,6 +278,7 @@ export class Match {
       decoysBaited: 0,
       spent: 0,
       connected: true,
+      forfeited: false,
       ready: false,
       inTransit: false,
       burned: new Set(),
@@ -286,13 +303,39 @@ export class Match {
 
   setReady(userId: string, ready: boolean) {
     const p = this.findByUser(userId);
-    if (p) p.ready = ready;
+    if (!p) return;
+    // A stake is the price of a seat, so nobody can ready up without one.
+    if (ready && this.stakingActive && !this.isStaked(p)) return;
+    p.ready = ready;
+  }
+
+  isStaked(p: Player): boolean {
+    return !!p.wallet && this.staked.has(p.wallet.toLowerCase());
+  }
+
+  /** Distinct wallets in the escrow, which is the contract's own player count. */
+  get stakedCount(): number {
+    return this.staked.size;
+  }
+
+  markStaked(address: string): void {
+    const key = address.toLowerCase();
+    if (this.staked.has(key)) return;
+    this.staked.add(key);
+    const p = this.playerList.find((x) => x.wallet?.toLowerCase() === key);
+    this.pushLog("info", p?.slot ?? null, `${p?.name ?? "A player"} staked into the pot.`);
+    this.onChange?.(this);
   }
 
   canStart(userId: string): string | null {
     if (userId !== this.hostUserId) return "Only the host can start the match.";
     if (this.status !== "LOBBY") return "Match already started.";
     if (this.players.size < 2) return "Need at least 2 agencies.";
+    if (this.starting) return "Match is already starting.";
+    if (this.stakingActive) {
+      if (!this.tournamentReady) return "The tournament escrow is still opening — try again in a moment.";
+      if (this.playerList.some((p) => !this.isStaked(p))) return "Every agency must stake before the match can start.";
+    }
     if (this.playerList.some((p) => !p.ready && p.userId !== this.hostUserId))
       return "All agencies must be ready.";
     return null;
@@ -354,6 +397,44 @@ export class Match {
       p.slot,
       `${AGENCY_META[p.agency].name} dispatched ${spec.codename}${escorted ? " under escort" : ""}.`,
     );
+    return null;
+  }
+
+  /**
+   * Give up. The player's couriers leave the board, they can no longer act,
+   * and they rank below everyone still playing. If a single player remains,
+   * that player wins on the spot.
+   */
+  forfeit(userId: string): string | null {
+    if (this.status !== "ACTIVE") return "Match is not running.";
+    const p = this.findByUser(userId);
+    if (!p) return "You are not in this match.";
+    if (p.forfeited) return "You have already forfeited.";
+
+    p.forfeited = true;
+    p.inTransit = false;
+    p.escorts = 0;
+
+    const token = this.activeToken.get(p.slot);
+    if (token) this.pending.delete(token);
+    this.activeToken.delete(p.slot);
+
+    // Their couriers leave play, so their keys can be opened now.
+    this.revealUnresolved(p.slot);
+
+    for (const [id, msg] of this.messengers) {
+      if (msg.ownerSlot === p.slot && msg.status === "IN_TRANSIT") {
+        this.messengers.delete(id);
+        this.stalledNotified.delete(id);
+      } else {
+        msg.pools.delete(p.slot);
+      }
+    }
+
+    this.pushLog("info", p.slot, `${p.name} forfeited — ${AGENCY_META[p.agency].name} goes dark.`);
+
+    const alive = this.playerList.filter((q) => !q.forfeited);
+    if (alive.length === 1) this.declareWinner(alive[0], "FORFEIT");
     return null;
   }
 
@@ -515,8 +596,25 @@ export class Match {
    */
   private revealOnChain(m: Messenger): void {
     if (!chain.enabled || !this.matchIdHex || !m.courierIdHex || m.nonce === null) return;
+    // Once only: the contract rejects a second reveal, and a failed write costs a nonce resync.
+    if (this.revealedOnChain.has(m.courierIdHex)) return;
+    this.revealedOnChain.add(m.courierIdHex);
     chain.revealCourier(this.matchIdHex, m.courierIdHex, m.realKeyIndex, m.nonce);
     chain.markLanded(this.matchIdHex, m.courierIdHex);
+  }
+
+  /**
+   * Every anchored courier must be opened before the match is over, otherwise
+   * its commitment sits unrevealed and the audit reads it as the server having
+   * failed to prove it. Called for couriers pulled from play (a forfeit) and
+   * for whatever is still flying when the match ends.
+   */
+  private revealUnresolved(ownerSlot?: number): void {
+    for (const m of this.messengers.values()) {
+      if (m.status !== "IN_TRANSIT") continue;
+      if (ownerSlot !== undefined && m.ownerSlot !== ownerSlot) continue;
+      this.revealOnChain(m);
+    }
   }
 
   /** Links the wallet a player will pay boosters from. */
@@ -606,6 +704,7 @@ export class Match {
     }
 
     for (const p of this.players.values()) {
+      if (p.forfeited) continue;
       while (now - p.lastPassiveAt >= PASSIVE_INTEL_MS) {
         p.intel += PASSIVE_INTEL;
         p.lastPassiveAt += PASSIVE_INTEL_MS;
@@ -676,6 +775,7 @@ export class Match {
     if (this.status !== "ACTIVE") return "Match is not running.";
     const p = this.findByUser(userId);
     if (!p) return "You are not in this match.";
+    if (p.forfeited) return "You have forfeited this match.";
     return p;
   }
 
@@ -900,12 +1000,15 @@ export class Match {
     this.winner = { slot: p.slot, name: p.name, winType };
     this.status = "FINISHED";
     this.endsAt = Date.now();
+    this.revealUnresolved();
     this.pushLog(
       "win",
       p.slot,
       winType === "BLACKOUT"
         ? `BLACKOUT — ${p.name} exposed the network.`
-        : `${p.name} completed ${p.operation.name}.`,
+        : winType === "FORFEIT"
+          ? `${p.name} wins — every rival forfeited.`
+          : `${p.name} completed ${p.operation.name}.`,
     );
     this.onFinish?.(this);
   }
@@ -914,6 +1017,7 @@ export class Match {
     // Deterministic tiebreak: steps -> cracks -> intel.
     const ranked = [...this.playerList].sort(
       (a, b) =>
+        Number(a.forfeited) - Number(b.forfeited) ||
         b.step - a.step || b.cracksMade - a.cracksMade || b.intel - a.intel,
     );
     const top = ranked[0];
@@ -922,6 +1026,7 @@ export class Match {
       this.pushLog("win", top.slot, `Time expired — ${top.name} leads the board.`);
     }
     this.status = "FINISHED";
+    this.revealUnresolved();
     this.onFinish?.(this);
   }
 
@@ -935,6 +1040,7 @@ export class Match {
   results(): MatchResultPlayer[] {
     const ranked = [...this.playerList].sort(
       (a, b) =>
+        Number(a.forfeited) - Number(b.forfeited) ||
         b.step - a.step || b.cracksMade - a.cracksMade || b.intel - a.intel,
     );
     return ranked.map((p, i) => ({
@@ -973,6 +1079,8 @@ export class Match {
       cracksMade: p.cracksMade,
       timesCracked: p.timesCracked,
       connected: p.connected,
+      forfeited: p.forfeited,
+      staked: this.isStaked(p),
       ready: p.ready,
       isHost: p.userId === this.hostUserId,
       inTransit: p.inTransit,
@@ -1053,6 +1161,15 @@ export class Match {
               unitPriceWei: chain.unitPriceWei,
               maxUnitsPerBoost: chain.maxUnitsPerBoost,
               matchIdHex: this.matchIdHex,
+              tournament: this.stakingActive
+                ? {
+                    stakeWei: chain.stakeWei,
+                    potWei: (BigInt(chain.stakeWei) * BigInt(this.staked.size)).toString(),
+                    tokenAddress: chain.tokenAddress,
+                    escrowAddress: chain.escrowAddress,
+                    ready: this.tournamentReady,
+                  }
+                : null,
             }
           : null,
     };

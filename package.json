@@ -16,6 +16,7 @@
     "playtest": "node scripts/playtest.mjs",
     "sit-in": "node scripts/sit-in.mjs",
     "balance": "node scripts/escort-check.mjs",
+    "stake-playtest": "node scripts/stake-playtest.mjs",
     "perf": "node scripts/perf-probe.mjs"
   },
   "prisma": {

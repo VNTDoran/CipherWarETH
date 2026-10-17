@@ -42,6 +42,17 @@ export async function createMatch(hostUserId: string): Promise<Match> {
   const match = new Match(code, hostUserId);
   matches.set(code, match);
 
+  // Staking is on whenever the chain is: open the escrow tournament now, so it
+  // is ready by the time players have linked their wallets.
+  if (chain.staking && match.matchIdHex) {
+    match.stakingActive = true;
+    void chain.createTournament(match.matchIdHex).then((ok) => {
+      match.tournamentReady = ok;
+      if (!ok) console.error(`[chain] could not open a tournament for ${code}`);
+      match.onChange?.(match);
+    });
+  }
+
   const row = await prisma.match.create({
     data: { code, hostId: hostUserId, status: "LOBBY" },
   });
@@ -202,7 +213,13 @@ function anchorResult(
   }
 
   const winTypeCode =
-    match.winner?.winType === "OPERATION" ? 0 : match.winner?.winType === "BLACKOUT" ? 1 : 2;
+    match.winner?.winType === "OPERATION"
+      ? 0
+      : match.winner?.winType === "BLACKOUT"
+        ? 1
+        : match.winner?.winType === "FORFEIT"
+          ? 3
+          : 2;
   const durationSeconds = match.startedAt
     ? Math.round((Date.now() - match.startedAt) / 1000)
     : 0;
@@ -217,4 +234,8 @@ function anchorResult(
 
   const winnerWallet = withWallets.find((r) => r.slot === winner.slot)!.player;
   chain.payBounty(match.matchIdHex, winnerWallet);
+
+  // The pot. Whoever won keeps everyone's stake — a forfeiter included, which
+  // is the whole point of putting something at risk.
+  if (match.stakingActive) chain.settleTournament(match.matchIdHex, winnerWallet);
 }

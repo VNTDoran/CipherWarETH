@@ -89,7 +89,7 @@ model Match {
   hostId     String
   winner     User?     @relation("MatchWinner", fields: [winnerId], references: [id])
   winnerId   String?
-  winType    String? // OPERATION | BLACKOUT | TIMEOUT
+  winType    String? // OPERATION | BLACKOUT | TIMEOUT | FORFEIT
   createdAt  DateTime  @default(now())
   startedAt  DateTime?
   endedAt    DateTime?

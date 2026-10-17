@@ -1,9 +1,16 @@
 import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
 
-const SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET ?? "cipher-war-dev-secret-change-me-in-production",
-);
+// Resolved on first use, not at import: the custom server imports this module
+// before it has loaded .env, and a secret frozen at that point would differ
+// from the one Next uses, so every socket handshake would be rejected.
+let secretKey: Uint8Array | null = null;
+function secret(): Uint8Array {
+  secretKey ??= new TextEncoder().encode(
+    process.env.JWT_SECRET ?? "cipher-war-dev-secret-change-me-in-production",
+  );
+  return secretKey;
+}
 
 export const SESSION_COOKIE = "cw_session";
 const MAX_AGE_SEC = 60 * 60 * 24 * 7;
@@ -28,13 +35,13 @@ export async function createToken(payload: SessionPayload): Promise<string> {
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${MAX_AGE_SEC}s`)
-    .sign(SECRET);
+    .sign(secret());
 }
 
 export async function readToken(token: string | undefined): Promise<SessionPayload | null> {
   if (!token) return null;
   try {
-    const { payload } = await jwtVerify(token, SECRET);
+    const { payload } = await jwtVerify(token, secret());
     if (typeof payload.sub !== "string") return null;
     return {
       sub: payload.sub,
