@@ -112,6 +112,7 @@ function hasOtherSocket(code: string, userId: string, exceptSocketId: string): b
 }
 
 function attachFinishHook(match: Match) {
+  match.onChange = (m) => broadcast(m);
   match.onFinish = (m) => {
     if (finishing.has(m.code)) return;
     finishing.add(m.code);
@@ -176,6 +177,19 @@ io.on("connection", (socket: Socket) => {
     const err = match.canStart(data.userId);
     if (err) return socket.emit("errorMsg", { message: err });
 
+    // Close the table on-chain before play: once the match is running nobody
+    // else may join the pot. A full table has already locked itself.
+    if (match.stakingActive && match.matchIdHex && match.stakedCount < 4) {
+      match.starting = true;
+      const locked = await chain.lockTournament(match.matchIdHex);
+      match.starting = false;
+      if (!locked) {
+        return socket.emit("errorMsg", {
+          message: "Could not lock the tournament on-chain. Check that at least 2 distinct wallets have staked.",
+        });
+      }
+    }
+
     const config = await loadEngineConfig();
     match.configure(config.operations, config.tunings);
     match.start();
@@ -195,6 +209,14 @@ io.on("connection", (socket: Socket) => {
     const match = data.code ? getMatch(data.code) : undefined;
     if (!match) return;
     const err = match.decoy(data.userId);
+    if (err) return socket.emit("errorMsg", { message: err });
+    broadcast(match);
+  });
+
+  safe(socket, "forfeit", () => {
+    const match = data.code ? getMatch(data.code) : undefined;
+    if (!match) return;
+    const err = match.forfeit(data.userId);
     if (err) return socket.emit("errorMsg", { message: err });
     broadcast(match);
   });
@@ -243,12 +265,35 @@ io.on("connection", (socket: Socket) => {
     broadcast(match);
   });
 
+  safe(socket, "checkStake", async () => {
+    const match = data.code ? getMatch(data.code) : undefined;
+    if (!match || !match.stakingActive || !match.matchIdHex) return;
+    const wallet = match.findByUser(data.userId)?.wallet;
+    if (!wallet) return;
+    // The client says it staked; the chain decides. The node can lag a moment
+    // behind the receipt the player saw, so retry briefly.
+    for (let i = 0; i < 8; i++) {
+      if (await chain.hasStaked(match.matchIdHex, wallet)) {
+        match.markStaked(wallet);
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 750));
+    }
+  });
+
   safe(socket, "linkWallet", (p: { address: string | null }) => {
     const match = data.code ? getMatch(data.code) : undefined;
     if (!match) return;
     const addr = typeof p?.address === "string" ? p.address : null;
     match.setWallet(data.userId, addr);
     broadcast(match);
+    // A stake made earlier (page reloaded, wallet re-linked) won't re-emit its
+    // event, so ask the contract.
+    if (addr && match.stakingActive && match.matchIdHex) {
+      void chain.hasStaked(match.matchIdHex, addr).then((joined) => {
+        if (joined) match.markStaked(addr);
+      });
+    }
   });
 
   safe(socket, "leave", () => {
@@ -275,6 +320,14 @@ io.on("connection", (socket: Socket) => {
 
 // A booster is only credited once the money has actually moved, so the signal
 // comes from the contract event rather than from the player's client.
+chain.onStake((e) => {
+  for (const match of listMatches()) {
+    if (match.matchIdHex?.toLowerCase() !== e.matchIdHex) continue;
+    match.markStaked(e.player);
+    break;
+  }
+});
+
 chain.onBoost((e) => {
   for (const match of listMatches()) {
     if (match.matchIdHex?.toLowerCase() !== e.matchIdHex) continue;

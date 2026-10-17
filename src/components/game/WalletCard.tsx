@@ -21,7 +21,7 @@ export default function WalletCard({
   compact,
 }: {
   chain: MatchView["chain"];
-  wallet: WalletState;
+  wallet: WalletState & { switchNetwork?: () => void };
   onConnect: () => void;
   compact?: boolean;
 }) {
@@ -57,8 +57,14 @@ export default function WalletCard({
           </code>
           {wallet.wrongNetwork && (
             <p className="mt-2 rounded border border-alert/40 bg-alert/10 px-2 py-1 font-mono text-[10px] text-alert">
-              Wrong network — switch MetaMask to chain {chain.chainId}.
+              Wrong network — MetaMask is on chain {wallet.walletChainId ?? "?"}, switch to chain {chain.chainId}.
+              <button type="button" className="btn-ghost mt-1 block px-2 py-1" onClick={wallet.switchNetwork}>
+                switch network
+              </button>
             </p>
+          )}
+          {wallet.error && (
+            <p className="mt-1.5 font-mono text-[10px] text-alert">{wallet.error}</p>
           )}
         </>
       ) : (

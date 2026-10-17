@@ -21,7 +21,7 @@ export default function BoostPanel({
   onBoost,
 }: {
   view: MatchView;
-  wallet: WalletState;
+  wallet: WalletState & { switchNetwork?: () => void };
   onConnect: () => void;
   onBoost: (courierIdHex: string, units: number) => Promise<string | null>;
 }) {
@@ -69,7 +69,10 @@ export default function BoostPanel({
 
       {wallet.wrongNetwork && (
         <p className="mt-2 rounded border border-alert/40 bg-alert/10 px-2 py-1 font-mono text-[10px] text-alert">
-          Wrong network — switch MetaMask to chain {view.chain.chainId}.
+          Wrong network — MetaMask is on chain {wallet.walletChainId ?? "?"}, switch to chain {view.chain.chainId}.
+          <button type="button" className="btn-ghost ml-2 px-2 py-0.5" onClick={wallet.switchNetwork}>
+            switch network
+          </button>
         </p>
       )}
 

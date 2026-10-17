@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useState } from "react";
 import { AGENCY_META } from "../../../shared/constants";
 import type { MatchView } from "../../../shared/types";
-import type { WalletState } from "@/lib/useWallet";
+import type { WalletApi } from "@/lib/useWallet";
+import StakePanel from "./StakePanel";
 import WalletCard from "./WalletCard";
 
 export default function LobbyRoom({
@@ -15,7 +16,7 @@ export default function LobbyRoom({
   onStart,
 }: {
   view: MatchView;
-  wallet: WalletState;
+  wallet: WalletApi;
   onConnectWallet: () => void;
   onReady: (ready: boolean) => void;
   onStart: () => void;
@@ -26,6 +27,8 @@ export default function LobbyRoom({
   const others = view.players.filter((p) => !p.isHost);
   const allReady = others.every((p) => p.ready);
   const enough = view.players.length >= 2;
+  const tournament = view.chain?.tournament ?? null;
+  const allStaked = !tournament || view.players.every((p) => p.staked);
 
   async function copyCode() {
     try {
@@ -101,6 +104,15 @@ export default function LobbyRoom({
               >
                 {p.isHost ? "ready" : p.ready ? "ready" : "waiting"}
               </span>
+              {tournament && (
+                <span
+                  className={`font-mono text-[10px] uppercase tracking-widest ${
+                    p.staked ? "text-signal" : "text-gold"
+                  }`}
+                >
+                  {p.staked ? "staked" : "no stake"}
+                </span>
+              )}
             </div>
           );
         })}
@@ -111,6 +123,11 @@ export default function LobbyRoom({
           <WalletCard chain={view.chain} wallet={wallet} onConnect={onConnectWallet} />
         </div>
       )}
+      {tournament && (
+        <div className="mt-4">
+          <StakePanel view={view} wallet={wallet} />
+        </div>
+      )}
 
       <div className="mt-6 space-y-3">
         {isHost ? (
@@ -118,12 +135,14 @@ export default function LobbyRoom({
             <button
               type="button"
               className="btn-primary w-full py-3.5 text-sm"
-              disabled={!enough || !allReady}
+              disabled={!enough || !allStaked || !allReady}
               onClick={onStart}
             >
               {!enough
                 ? "need at least 2 agencies"
-                : !allReady
+                : !allStaked
+                  ? "waiting for every stake"
+                  : !allReady
                   ? "waiting for all agencies"
                   : `open transmissions · ${view.players.length} agencies`}
             </button>
@@ -136,9 +155,10 @@ export default function LobbyRoom({
           <button
             type="button"
             className={me?.ready ? "btn-ghost w-full py-3.5 text-sm" : "btn-primary w-full py-3.5 text-sm"}
+            disabled={!me?.ready && !!tournament && !me?.staked}
             onClick={() => onReady(!me?.ready)}
           >
-            {me?.ready ? "stand down" : "ready"}
+            {me?.ready ? "stand down" : tournament && !me?.staked ? "stake to ready up" : "ready"}
           </button>
         )}
       </div>

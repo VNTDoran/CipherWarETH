@@ -52,7 +52,7 @@ export default function AgencyPanel({
       className={clsx(
         "relative flex flex-col justify-between overflow-hidden rounded-md border p-2.5 transition sm:p-3",
         isYou ? "border-white/25 bg-white/[0.04]" : "border-white/20 bg-ink-800/50",
-        !player.connected && "opacity-45",
+        (!player.connected || player.forfeited) && "opacity-45",
       )}
     >
       <div
@@ -121,7 +121,12 @@ export default function AgencyPanel({
             in transit
           </div>
         )}
-        {!player.connected && (
+        {player.forfeited && (
+          <div className="font-mono text-[10px] uppercase tracking-widest text-alert">
+            forfeited
+          </div>
+        )}
+        {!player.connected && !player.forfeited && (
           <div className="font-mono text-[10px] uppercase tracking-widest text-alert">
             disconnected
           </div>

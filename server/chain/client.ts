@@ -36,6 +36,7 @@ const FUEL_ABI = [
   "function registerCourier(bytes32 matchId, bytes32 courierId, address owner, uint32 unitsAtDispatch, uint32 requiredUnits)",
   "function markLanded(bytes32 matchId, bytes32 courierId)",
   "function payBounty(bytes32 matchId, address winner)",
+  "function bounty(bytes32 matchId) view returns (uint256)",
   "function unitsOutstanding(bytes32 matchId, bytes32 courierId) view returns (uint32)",
   "function FUEL_UNIT_PRICE() view returns (uint256)",
   "function MAX_UNITS_PER_BOOST() view returns (uint32)",
@@ -45,6 +46,26 @@ const FUEL_ABI = [
 const MATCH_REGISTRY_ABI = [
   "function finalizeMatch(bytes32 matchId, uint8 winnerSlot, uint8 winType, uint32 durationSeconds, (address player, uint8 slot, uint8 directivesConfirmed, uint8 cracksMade, uint32 finalIntel)[] results)",
 ];
+
+const ESCROW_ABI = [
+  "function createTournament(bytes32 matchId, uint256 stake, uint8 maxPlayers, uint64 joinWindowSeconds, uint64 settleWindowSeconds)",
+  "function lock(bytes32 matchId)",
+  "function settle(bytes32 matchId, address winner)",
+  "function hasJoined(bytes32 matchId, address player) view returns (bool)",
+  "event PlayerJoined(bytes32 indexed matchId, address indexed player, uint256 stake, uint256 pot)",
+];
+
+/** Lobby may sit open this long; the escrow refuses stakes after it. */
+const TOURNAMENT_JOIN_WINDOW_S = 30 * 60;
+/** Match hard cap plus slack. Past this the players' refund right takes over. */
+const TOURNAMENT_SETTLE_WINDOW_S = 60 * 60;
+
+export interface StakeEvent {
+  matchIdHex: string;
+  player: string;
+}
+
+export type StakeListener = (e: StakeEvent) => void;
 
 export interface BoostEvent {
   matchIdHex: string;
@@ -65,6 +86,15 @@ class ChainClient {
   rpcUrl = "http://127.0.0.1:8545";
   chainId = 31337;
   fuelAddress = "";
+  escrowAddress = "";
+  tokenAddress = "";
+  /** Per-player stake in wei (INTEL has 18 decimals). Staking is on when > 0. */
+  stakeWei = "0";
+
+  /** True when matches should be staked: chain up, escrow + token known. */
+  get staking(): boolean {
+    return this.enabled && !!this.escrow && BigInt(this.stakeWei) > 0n;
+  }
 
   private provider?: JsonRpcProvider;
   /** NonceManager keeps a monotonic local counter, which is what a
@@ -74,7 +104,9 @@ class ChainClient {
   private commitReveal?: Contract;
   private fuel?: Contract;
   private matchRegistry?: Contract;
+  private escrow?: Contract;
   private listeners = new Set<BoostListener>();
+  private stakeListeners = new Set<StakeListener>();
 
   /** Cached on-chain constants, read once at startup. */
   unitPriceWei = "1000000000000000";
@@ -97,8 +129,15 @@ class ChainClient {
       .then(async () => {
         return op();
       })
-      .catch((err) => {
+      .catch(async (err) => {
         console.error(`[chain] ${label} failed`, err);
+        // NonceManager spends a nonce locally before the node accepts the
+        // transaction, so a call that reverts at gas estimation leaves it one
+        // ahead, and the next write is rejected with "nonce too high". Resync
+        // from the chain — but only after ethers' ~250ms cache of the account's
+        // transaction count has expired, or the resync reads the stale value.
+        await new Promise((r) => setTimeout(r, 400));
+        this.wallet?.reset();
         return null;
       });
     // Keep the chain alive even when a link rejects.
@@ -111,6 +150,11 @@ class ChainClient {
     this.rpcUrl = process.env.CHAIN_RPC_URL ?? "http://127.0.0.1:8545";
     this.chainId = Number(process.env.CHAIN_ID ?? 31337);
     this.fuelAddress = process.env.CHAIN_COURIER_FUEL_ADDRESS ?? "";
+    this.escrowAddress = process.env.CHAIN_TOURNAMENT_ESCROW_ADDRESS ?? "";
+    this.tokenAddress = process.env.CHAIN_INTEL_TOKEN_ADDRESS ?? "";
+    // Whole INTEL per player. 0 turns staking off while keeping the rest of the chain.
+    const stakeIntel = Number(process.env.CHAIN_STAKE_INTEL ?? 100);
+    this.stakeWei = (BigInt(Math.max(0, Math.floor(stakeIntel))) * 10n ** 18n).toString();
 
     if (!this.enabled) {
       console.log("[chain] disabled (set CHAIN_ENABLED=true to anchor matches)");
@@ -143,6 +187,27 @@ class ChainClient {
         MATCH_REGISTRY_ABI,
         this.wallet,
       );
+
+      if (this.escrowAddress && this.tokenAddress) {
+        this.escrow = new Contract(this.escrowAddress, ESCROW_ABI, this.wallet);
+        // Stakes are signed by the players, so the game learns of them from the chain.
+        await this.escrow.on("PlayerJoined", (matchId, player) => {
+          const e: StakeEvent = {
+            matchIdHex: String(matchId).toLowerCase(),
+            player: String(player).toLowerCase(),
+          };
+          console.log(`[chain] stake received from ${e.player}`);
+          for (const l of this.stakeListeners) {
+            try {
+              l(e);
+            } catch (err) {
+              console.error("[chain] stake listener failed", err);
+            }
+          }
+        });
+      } else {
+        console.warn("[chain] escrow/token address missing — staking is off");
+      }
 
       const net = await this.provider.getNetwork();
       this.unitPriceWei = (await this.fuel.FUEL_UNIT_PRICE()).toString();
@@ -181,6 +246,11 @@ class ChainClient {
       console.error("[chain] init failed, continuing without a chain:", err);
       this.enabled = false;
     }
+  }
+
+  onStake(listener: StakeListener): () => void {
+    this.stakeListeners.add(listener);
+    return () => this.stakeListeners.delete(listener);
   }
 
   onBoost(listener: BoostListener): () => void {
@@ -317,11 +387,61 @@ class ChainClient {
     });
   }
 
+  // ───────────────────────────── Tournaments ─────────────────────────────
+
+  async createTournament(matchIdHex: string): Promise<boolean> {
+    if (!this.staking || !this.escrow) return false;
+    const r = await this.enqueue("createTournament", async () => {
+      const tx = await this.escrow!.createTournament(
+        matchIdHex,
+        BigInt(this.stakeWei),
+        4,
+        TOURNAMENT_JOIN_WINDOW_S,
+        TOURNAMENT_SETTLE_WINDOW_S,
+      );
+      await tx.wait();
+      return true;
+    });
+    return r === true;
+  }
+
+  /** Closes joins. Awaited by the caller: play must not start on an open table. */
+  async lockTournament(matchIdHex: string): Promise<boolean> {
+    if (!this.escrow) return false;
+    const r = await this.enqueue("lockTournament", async () => {
+      const tx = await this.escrow!.lock(matchIdHex);
+      await tx.wait();
+      return true;
+    });
+    return r === true;
+  }
+
+  /** Pays the whole pot to the winner. Everyone else's stake stays in it. */
+  settleTournament(matchIdHex: string, winner: string): void {
+    if (!this.escrow) return;
+    void this.enqueue("settleTournament", async () => {
+      const tx = await this.escrow!.settle(matchIdHex, winner);
+      await tx.wait();
+      console.log(`[chain] tournament settled, pot paid to ${winner}`);
+    });
+  }
+
+  /** Read-only: lets a reconnecting player's earlier stake be recognised. */
+  async hasStaked(matchIdHex: string, player: string): Promise<boolean> {
+    if (!this.escrow) return false;
+    try {
+      return Boolean(await this.escrow.hasJoined(matchIdHex, player));
+    } catch {
+      return false;
+    }
+  }
+
   payBounty(matchIdHex: string, winner: string): void {
     if (!this.enabled || !this.fuel) return;
-    // NothingToPay is normal when no booster was ever bought, so this one is
-    // expected to fail sometimes and enqueue() already swallows it.
+    // No booster bought means nothing to pay. Skip rather than send a call
+    // that reverts: a revert at gas estimation desyncs the nonce counter.
     void this.enqueue("payBounty", async () => {
+      if ((await this.fuel!.bounty(matchIdHex)) === 0n) return;
       const tx = await this.fuel!.payBounty(matchIdHex, winner);
       await tx.wait();
     });

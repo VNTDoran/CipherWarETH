@@ -12,7 +12,7 @@ export type MessengerKind = "DIRECTIVE" | "DECOY" | "AMBIENT";
 export type Tier = "BRONZE" | "SILVER" | "GOLD";
 export type MinigameKey = "cipher_type" | "frequency_lock" | "signal_trace";
 export type MatchStatus = "LOBBY" | "ACTIVE" | "FINISHED";
-export type WinType = "OPERATION" | "BLACKOUT" | "TIMEOUT";
+export type WinType = "OPERATION" | "BLACKOUT" | "TIMEOUT" | "FORFEIT";
 export type ShopItem = "SPY" | "ENCRYPT" | "ESCORT";
 
 export interface PlayerView {
@@ -31,6 +31,10 @@ export interface PlayerView {
   cracksMade: number;
   timesCracked: number;
   connected: boolean;
+  /** Gave up mid-match: out of play, ranked below everyone still in. */
+  forfeited: boolean;
+  /** Has put their stake into the escrow. Always false without staking. */
+  staked: boolean;
   ready: boolean;
   isHost: boolean;
   /** True while one of this player's directive messengers is in the ether. */
@@ -111,6 +115,17 @@ export interface MatchView {
     maxUnitsPerBoost: number;
     /** The on-chain match id, as 0x-prefixed bytes32. */
     matchIdHex: string;
+    /** Null when this match is free to play. */
+    tournament: {
+      /** Per-player stake, wei of INTEL. */
+      stakeWei: string;
+      /** Everything staked so far, wei of INTEL. The winner takes all of it. */
+      potWei: string;
+      tokenAddress: string;
+      escrowAddress: string;
+      /** The escrow tournament exists on-chain, so stakes can be accepted. */
+      ready: boolean;
+    } | null;
   } | null;
 }
 
@@ -190,11 +205,14 @@ export interface ClientToServer {
   start: () => void;
   dispatch: () => void;
   decoy: () => void;
+  forfeit: () => void;
   buy: (p: { item: ShopItem }) => void;
   attack: (p: { messengerId: string }) => void;
   submit: (p: MinigameSubmission) => void;
   commit: (p: { messengerId: string; keyIndex: number }) => void;
   /** Tells the server which address this player will pay boosters from. */
   linkWallet: (p: { address: string | null }) => void;
+  /** "I just staked" — the server confirms it against the chain, never trusts it. */
+  checkStake: () => void;
   leave: () => void;
 }

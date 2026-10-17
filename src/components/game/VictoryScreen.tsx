@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { AGENCY_META, OPERATION_STEPS } from "../../../shared/constants";
 import type { MatchView } from "../../../shared/types";
+import { formatIntel } from "@/lib/intel";
 
 const WHY: Record<string, string> = {
   OPERATION: "completed the operation",
   BLACKOUT: "blacked out the network",
   TIMEOUT: "led the board when time expired",
+  FORFEIT: "won — every rival forfeited",
 };
 
 export default function VictoryScreen({ view }: { view: MatchView }) {
@@ -16,7 +18,7 @@ export default function VictoryScreen({ view }: { view: MatchView }) {
   const youWon = w?.slot === view.youSlot;
 
   const ranked = [...view.players].sort(
-    (a, b) => b.step - a.step || b.cracksMade - a.cracksMade || b.intel - a.intel,
+    (a, b) => Number(a.forfeited) - Number(b.forfeited) || b.step - a.step || b.cracksMade - a.cracksMade || b.intel - a.intel,
   );
 
   return (
@@ -33,6 +35,13 @@ export default function VictoryScreen({ view }: { view: MatchView }) {
           {winner && `${AGENCY_META[winner.agency].name} `}
           {WHY[w?.winType ?? "TIMEOUT"]}.
         </p>
+        {view.chain?.tournament && w && (
+          <p className="mt-2 text-center font-mono text-xs text-gold">
+            {youWon
+              ? `you take the pot: ${formatIntel(view.chain.tournament.potWei)} INTEL`
+              : `${w.name} takes the pot: ${formatIntel(view.chain.tournament.potWei)} INTEL`}
+          </p>
+        )}
 
         <div className="mt-6 space-y-1.5">
           {ranked.map((p, i) => {

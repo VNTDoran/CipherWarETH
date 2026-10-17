@@ -34,6 +34,7 @@ export default function GameBoard({
   actions: {
     dispatch: () => void;
     decoy: () => void;
+    forfeit: () => void;
     buy: (item: ShopItem) => void;
     attack: (id: string) => void;
     submit: (s: MinigameSubmission) => void;
@@ -42,6 +43,7 @@ export default function GameBoard({
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showLog, setShowLog] = useState(false);
+  const [confirmForfeit, setConfirmForfeit] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -89,6 +91,15 @@ export default function GameBoard({
               </span>
               <span className="font-mono text-sm font-bold text-signal">{me.intel}⟡</span>
             </>
+          )}
+          {me && !me.forfeited && view.status === "ACTIVE" && (
+            <button
+              type="button"
+              className="btn-ghost px-2 py-1 text-alert"
+              onClick={() => setConfirmForfeit(true)}
+            >
+              forfeit
+            </button>
           )}
           <button
             type="button"
@@ -180,6 +191,33 @@ export default function GameBoard({
           </div>
         ))}
       </div>
+
+      {confirmForfeit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/90 p-5 backdrop-blur">
+          <div className="panel w-full max-w-sm p-5 text-center">
+            <h2 className="font-display text-xl font-bold text-alert">Forfeit the match?</h2>
+            <p className="mt-2 text-sm text-slate-300">
+              Your couriers are withdrawn and you can no longer act. You will rank below every
+              agency still playing. This cannot be undone.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button type="button" className="btn-ghost flex-1" onClick={() => setConfirmForfeit(false)}>
+                keep playing
+              </button>
+              <button
+                type="button"
+                className="btn-ghost flex-1 text-alert"
+                onClick={() => {
+                  actions.forfeit();
+                  setConfirmForfeit(false);
+                }}
+              >
+                forfeit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {minigame && <MinigameHost assignment={minigame} onSubmit={actions.submit} />}
       {view.status === "FINISHED" && view.winner && <VictoryScreen view={view} />}

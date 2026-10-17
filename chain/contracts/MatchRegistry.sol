@@ -19,7 +19,7 @@ contract MatchRegistry {
     struct Match {
         bytes32 matchId;
         uint8 winnerSlot;
-        uint8 winType; // 0 = OPERATION, 1 = BLACKOUT, 2 = TIMEOUT
+        uint8 winType; // 0 = OPERATION, 1 = BLACKOUT, 2 = TIMEOUT, 3 = FORFEIT
         uint64 finalizedAt;
         uint32 durationSeconds;
         bool exists;

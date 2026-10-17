@@ -10,7 +10,7 @@ import { useWallet } from "@/lib/useWallet";
 export default function PlayClient({ code }: { code: string }) {
   const { view, status, fatal, toasts, minigame, actions } = useMatch(code);
   // Boosters are paid by the player, so the browser needs its own signer.
-  const wallet = useWallet(view?.chain ?? null, actions.linkWallet);
+  const wallet = useWallet(view?.chain ?? null, actions.linkWallet, actions.checkStake);
 
   // Nothing on this screen can be server-rendered meaningfully: it is driven
   // entirely by a live socket, and it reads the clock and the injected wallet
@@ -76,6 +76,7 @@ export default function PlayClient({ code }: { code: string }) {
       actions={{
         dispatch: actions.dispatch,
         decoy: actions.decoy,
+        forfeit: actions.forfeit,
         buy: actions.buy,
         attack: actions.attack,
         submit: actions.submit,

@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cipher War — Smart Contracts</title>
+<style>
+  :root{
+    --bg:#0b1220; --panel:#111a2e; --panel2:#16213a; --line:#243252; --text:#dbe4f5; --dim:#8fa0c0;
+    --green:#4ade80; --blue:#60a5fa; --amber:#fbbf24; --red:#f87171; --violet:#a78bfa; --code:#0a101d;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f4f6fb; --panel:#fff; --panel2:#eef2fa; --line:#d5dcec; --text:#17203a; --dim:#5b6a8c;
+      --green:#15803d; --blue:#1d4ed8; --amber:#b45309; --red:#b91c1c; --violet:#6d28d9; --code:#f0f3fa; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}
+  .wrap{max-width:960px;margin:0 auto;padding:24px 16px 80px}
+  h1{font-size:28px;margin:8px 0 4px}
+  h2{font-size:22px;margin:0}
+  h3{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin:22px 0 8px}
+  p{margin:8px 0}
+  code,pre{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+  code{background:var(--code);padding:1px 6px;border-radius:5px;font-size:.88em}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-x:auto;font-size:12.5px;line-height:1.55;margin:8px 0}
+  pre code{background:none;padding:0}
+  .lead{color:var(--dim);max-width:70ch}
+  nav{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 6px}
+  nav a{color:var(--text);text-decoration:none;border:1px solid var(--line);background:var(--panel);padding:6px 12px;border-radius:999px;font-size:13px}
+  nav a:hover{border-color:var(--blue)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;margin-top:22px}
+  .head{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;justify-content:space-between}
+  .addr{font:12px ui-monospace,Consolas,monospace;color:var(--dim);word-break:break-all}
+  .tag{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;border:1px solid;margin-right:4px;white-space:nowrap}
+  .t-server{color:var(--amber);border-color:var(--amber)}
+  .t-owner{color:var(--violet);border-color:var(--violet)}
+  .t-any{color:var(--green);border-color:var(--green)}
+  .t-view{color:var(--blue);border-color:var(--blue)}
+  .t-player{color:var(--red);border-color:var(--red)}
+  details{border:1px solid var(--line);border-radius:9px;background:var(--panel2);margin:8px 0}
+  summary{cursor:pointer;padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:"▸";color:var(--dim);transition:transform .15s}
+  details[open] summary::before{transform:rotate(90deg)}
+  summary .sig{font:13px ui-monospace,Consolas,monospace;font-weight:600}
+  summary .who{margin-left:auto}
+  .body{padding:0 14px 12px}
+  .note{border-left:3px solid var(--amber);background:var(--panel2);padding:8px 12px;border-radius:0 8px 8px 0;margin:12px 0;font-size:14px}
+  .flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:14px 0}
+  .step{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px}
+  .step b{display:block;margin-bottom:2px}
+  .step .n{color:var(--blue);font-weight:700}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-weight:600}
+  .ctl{display:flex;gap:8px;margin:14px 0 0}
+  button{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit;font-size:13px}
+  button:hover{border-color:var(--blue)}
+  .legend{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:14px;font-size:13px;color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Cipher War — Smart Contracts</h1>
+<p class="lead">Five contracts sit under the game. The match itself runs off-chain (it ticks ten times a second), so the chain only holds the moments that need trust: the secret key draw, fuel payments, the stake, and the final result. Examples use <code>ethers</code> v6 against the local Hardhat node.</p>
+
+<nav>
+  <a href="#overview">Overview</a>
+  <a href="#commit">CommitRevealRegistry</a>
+  <a href="#fuel">CourierFuel</a>
+  <a href="#token">IntelToken</a>
+  <a href="#escrow">TournamentEscrow</a>
+  <a href="#registry">MatchRegistry</a>
+  <a href="#conventions">Conventions</a>
+</nav>
+
+<div class="legend">
+  Who can call a method:
+  <span class="tag t-server">server</span> the game server (account #0)
+  <span class="tag t-owner">courier owner</span>
+  <span class="tag t-player">player</span>
+  <span class="tag t-any">anyone</span>
+  <span class="tag t-view">read-only</span>
+</div>
+<div class="ctl">
+  <button onclick="document.querySelectorAll('details').forEach(d=>d.open=true)">Expand all</button>
+  <button onclick="document.querySelectorAll('details').forEach(d=>d.open=false)">Collapse all</button>
+</div>
+
+<!-- ───────────────────────── OVERVIEW ───────────────────────── -->
+<section class="card" id="overview">
+  <h2>How the pieces fit</h2>
+  <p>Every contract except <code>IntelToken</code> has a fixed <code>gameServer</code> address set at deployment (<code>immutable</code>), and only that address can call its write methods marked <span class="tag t-server">server</span>. Reads are open to everyone, which is what lets any player re-verify the server.</p>
+  <div class="flow">
+    <div class="step"><span class="n">1</span><b>Stake</b>Players <code>approve</code> then <code>join</code> a <code>TournamentEscrow</code>, locking INTEL.</div>
+    <div class="step"><span class="n">2</span><b>Dispatch</b>Server calls <code>commitCourier</code> (hash of the secret key) and <code>registerCourier</code> (owner + fuel).</div>
+    <div class="step"><span class="n">3</span><b>Fly</b>Courier runs out of fuel and freezes. Its owner pays <code>boost</code> in ETH to restart it.</div>
+    <div class="step"><span class="n">4</span><b>Resolve</b>Server calls <code>revealCourier</code>; the chain rejects any value that doesn't match the hash.</div>
+    <div class="step"><span class="n">5</span><b>Settle</b><code>finalizeMatch</code> anchors the result, <code>settle</code> pays the pot, <code>payBounty</code> pays the fuel ETH.</div>
+  </div>
+  <table>
+    <tr><th>Contract</th><th>Holds</th><th>Trust problem it solves</th></tr>
+    <tr><td><code>CommitRevealRegistry</code></td><td>Key-draw commitments</td><td>Server can't move the real key after the fact.</td></tr>
+    <tr><td><code>CourierFuel</code></td><td>ETH bounty</td><td>Makes a stalled courier a real, paid transaction; bill can't be inflated.</td></tr>
+    <tr><td><code>IntelToken</code></td><td>INTEL balances</td><td>The in-game currency as a real ERC-20.</td></tr>
+    <tr><td><code>TournamentEscrow</code></td><td>Staked INTEL</td><td>A silent server can't keep the pot; players get refunds.</td></tr>
+    <tr><td><code>MatchRegistry</code></td><td>Results, career totals</td><td>The leaderboard can't be rewritten.</td></tr>
+  </table>
+</section>
+
+<!-- ───────────────────────── COMMIT REVEAL ───────────────────────── -->
+<section class="card" id="commit">
+  <div class="head"><h2>CommitRevealRegistry</h2><span class="addr">0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512</span></div>
+  <p>Every courier carries N candidate decryption keys and exactly one is real. Before the courier can be attacked, the server publishes only <code>keccak256(matchId, courierId, keyIndex, nonce)</code>. The hash is <b>binding</b> (no other input produces it, so the answer can't change) and <b>hiding</b> (the random <code>nonce</code> stops anyone from brute-forcing the N possible indexes). At resolution the server reveals the index and nonce, and the contract <b>reverts</b> if they don't hash to the stored commitment.</p>
+  <div class="note">Without the nonce there would be only N possible hashes, and anyone could hash indexes 0 to N-1 and read the key straight out of the commitment.</div>
+
+  <h3>Lifecycle (<code>Status</code> enum)</h3>
+  <table>
+    <tr><th>Value</th><th>Meaning</th></tr>
+    <tr><td><code>0 Unknown</code></td><td>Never committed.</td></tr>
+    <tr><td><code>1 Committed</code></td><td>Commitment published, courier in flight, reveal still allowed.</td></tr>
+    <tr><td><code>2 Revealed</code></td><td>Revealed and the hash checked out.</td></tr>
+    <tr><td><code>3 Defaulted</code></td><td>Deadline passed with no reveal. This is itself public evidence the server failed to prove.</td></tr>
+  </table>
+
+  <h3>Write methods</h3>
+  <details><summary><span class="sig">commitCourier(matchId, courierId, commitment, candidateCount, revealWindowSeconds)</span><span class="who tag t-server">server</span></summary><div class="body">
+    <p>Locks in the real key index <i>before</i> the courier is attackable. The hash is computed off-chain, so the preimage never touches the chain. Reverts with <code>AlreadyCommitted</code> on a repeat, <code>IndexOutOfRange</code> if <code>candidateCount</code> is 0, and <code>InvalidWindow</code> if the window is 0 or over 1 hour.</p>
+<pre><code>const { id, hexlify, randomBytes } = ethers;
+const matchId   = id("CIPHERWAR:ABC123");
+const courierId = id("courier-1");
+const keyIndex  = 3;                         // secret, picked by the server
+const nonce     = hexlify(randomBytes(32));  // secret, kept until reveal
+
+const commitment = await registry.computeCommitment(matchId, courierId, keyIndex, nonce);
+await registry.commitCourier(matchId, courierId, commitment, 8, 600); // 8 keys, 10 min window</code></pre>
+  </div></details>
+
+  <details><summary><span class="sig">revealCourier(matchId, courierId, keyIndex, nonce)</span><span class="who tag t-server">server</span></summary><div class="body">
+    <p>Opens the envelope. Reverts unless the preimage hashes exactly to the stored commitment, so a false reveal cannot even be recorded. Errors: <code>NotCommitted</code>, <code>AlreadyRevealed</code>, <code>RevealWindowClosed</code>, <code>IndexOutOfRange</code>, <code>BadCommitment</code>.</p>
+<pre><code>await registry.revealCourier(matchId, courierId, 3, nonce);          // ok
+
+await registry.revealCourier(matchId, courierId, 4, nonce);          // reverts: BadCommitment
+// a lie about the key index is rejected by the contract itself</code></pre>
+  </div></details>
+
+  <h3>Read methods</h3>
+  <details><summary><span class="sig">computeCommitment(matchId, courierId, keyIndex, nonce) → bytes32</span><span class="who tag t-view">view</span></summary><div class="body">
+    <p>The exact hash the server must produce. Pure: it reads no state, so anyone can recompute it from revealed values.</p>
+<pre><code>const h = await registry.computeCommitment(matchId, courierId, 3, nonce);</code></pre>
+  </div></details>
+  <details><summary><span class="sig">courierKey(matchId, courierId) → bytes32</span><span class="who tag t-view">view</span></summary><div class="body">
+    <p>The storage key <code>keccak256(matchId, courierId)</code>. Including <code>matchId</code> means two matches can reuse a courier id without colliding.</p>
+  </div></details>
+  <details><summary><span class="sig">getCourier(matchId, courierId) → Courier</span><span class="who tag t-view">view</span></summary><div class="body">
+    <p>Returns <code>commitment</code>, <code>committedAt</code>, <code>revealDeadline</code>, <code>candidateCount</code>, <code>keyIndex</code>, <code>nonce</code>, <code>revealed</code>. <code>keyIndex</code> and <code>nonce</code> are only meaningful once revealed.</p>
+<pre><code>const c = await registry.getCourier(matchId, courierId);
+console.log(c.revealed, c.keyIndex, c.candidateCount);</code></pre>
+  </div></details>
+  <details><summary><span class="sig">statusOf(matchId, courierId) → Status</span><span class="who tag t-view">view</span></summary><div class="body">
+    <p>Lifecycle state, including the silent-server case (<code>Defaulted</code>).</p>
+<pre><code>const s = await registry.statusOf(matchId, courierId);   // 0n..3n
+if (s === 3n) console.log("server never revealed — evidence of failure");</code></pre>
+  </div></details>
+  <details><summary><span class="sig">isProven(matchId, courierId) → bool</span><span class="who tag t-view">view</span></summary><div class="body">
+    <p>Independently re-hashes the stored preimage and compares it to the stored commitment. It cannot return false after <code>revealCourier</code> succeeds, but it lets a verifier avoid taking that on faith. The <code>/chain</code> page does this check in your browser.</p>
+  </div></details>
+  <details><summary><span class="sig">committedCount(matchId) / revealedCount(matchId) → uint32</span><span class="who tag t-view">view</span></summary><div class="body">
+    <p>Counters for the UI, such as "12 of 14 couriers proven this match".</p>
+  </div></details>
+  <details><summary><span class="sig">gameServer() → address</span><span class="who tag t-view">view</span></summary><div class="body"><p>The only address allowed to commit and reveal.</p></div></details>
+
+  <h3>Events</h3>
+  <table>
+    <tr><td><code>CourierCommitted(matchId, courierId, commitment, candidateCount, revealDeadline)</code></td></tr>
+    <tr><td><code>CourierRevealed(matchId, courierId, keyIndex, nonce)</code></td></tr>
+  </table>
+</section>
+
+<!-- ───────────────────────── COURIER FUEL ───────────────────────── -->
+<section class="card" id="fuel">
+  <div class="head"><h2>CourierFuel</h2><span class="addr">0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9</span></div>
+  <p>A courier is effectively a transaction. It leaves with a small fuel budget and, when that runs out, it <b>freezes mid-flight</b>, still fully attackable. The owner restarts it only by paying ETH with <code>boost()</code>. The ETH is not burned: it accumulates into a per-match bounty paid to the winner.</p>
+  <div class="note">The total fuel a courier demands is <b>hidden</b>. It is derived from the courier's secret preimage, so the owner buys a chunk and watches whether it moves, like discovering a transaction's real gas cost. After the reveal anyone can recompute it and prove the server did not inflate the bill.</div>
+
+  <h3>Constants</h3>
+  <table>
+    <tr><th>Name</th><th>Value</th><th>Meaning</th></tr>
+    <tr><td><code>FUEL_UNIT_PRICE</code></td><td>0.001 ETH</td><td>Price of one fuel unit.</td></tr>
+    <tr><td><code>SECONDS_PER_UNIT</code></td><td>5</td><td>Seconds of travel per unit.</td></tr>
+    <tr><td><code>MAX_UNITS_PER_BOOST</code></td><td>6</td><td>Cap per transaction, so nobody buys out all tension.</td></tr>
+    <tr><td><code>MIN/MAX_REQUIRED_UNITS</code></td><td>4 / 15</td><td>Range of the hidden fuel demand.</td></tr>
+  </table>
+
+  <h3>Write methods</h3>
+  <details><summary><span class="sig">registerCourier(matchId, courierId, owner, unitsAtDispatch, requiredUnits)</span><span class="who tag t-server">server</span></summary><div class="body">
+    <p>Records who may refuel the courier and how far it flies unaided. <code>requiredUnits</code> must be 4 to 15 (<code>BadRequirement</code> otherwise) and is derived by the server from the secret preimage. Reverts on a repeat (<code>AlreadyRegistered</code>) or zero owner.</p>
+<pre><code>const required = await fuel.deriveRequiredUnits(matchId, courierId, keyIndex, nonce); // e.g. 9
+await fuel.registerCourier(matchId, courierId, player1Address, 4, required);</code></pre>
+  </div></details>
+
+  <details><summary><span class="sig">boost(matchId, courierId) payable</span><span class="who tag t-owner">courier owner</span></summary><div class="body">
+    <p>Refuels a stalled courier. Only the registered owner may call it, and the ETH sent must buy between 1 and 6 units (<code>msg.value / 0.001 ETH</code>, rounded down). Adds to the bounty and emits <code>CourierBoosted</code>, which the server listens for before resuming travel.</p>
+    <p>Errors: <code>UnknownCourier</code>, <code>CourierAlreadyLanded</code>, <code>NotCourierOwner</code>, <code>NoValueSent</code>, <code>TooMuchFuel</code>.</p>
+<pre><code>const value = await fuel.quote(3);                    // 3 units = 0.003 ETH
+const tx = await fuel.connect(player1).boost(matchId, courierId, { value });
+await tx.wait();
+
+await fuel.connect(player2).boost(matchId, courierId, { value }); // reverts: NotCourierOwner
+await fuel.connect(player1).boost(matchId, courierId, { value: ethers.parseEther("0.01") });
+                                                      // reverts: TooMuchFuel (10 units &gt; 6)</code></pre>
+  </div></details>
+
+  <details><summary><span class="sig">markLanded(matchId, courierId)</span><span class="who tag t-server">server</span></summary><div class="body">
+    <p>Marks the courier finished so it can no longer be boosted.</p>
+<pre><code>await fuel.markLanded(matchId, courierId);</code></pre>
+  </div></details>
+
+  <details><summary><span class="sig">payBounty(matchId, winner)</span><span class="who tag t-server">server</span></summary><div class="body">
+    <p>Sends all the ETH collected from boosts in this match to the winner. Once only (<code>BountyAlreadyPaid</code>), and reverts with <code>NothingToPay</code> if no one ever boosted.</p>
+<pre><code>await fuel.payBounty(matchId, winnerAddress);
+console.log(await fuel.bountyPaid(matchId));   // true</code></pre>
+  </div></details>
+
+  <h3>Read methods</h3>
+  <details><summary><span class="sig">quote(units) → uint256</span><span class="who tag t-view">view</span></summary><div class="body">
+    <p>Cost in wei for a number of units, used by the UI to fill in the transaction value.</p>
+<pre><code>ethers.formatEther(await fuel.quote(6));   // "0.006"</code></pre>
+  </div></details>
+  <details><summary><span class="sig">isStalled(matchId, courierId) → bool</span><span class="who tag t-view">view</span></summary><div class="body"><p>True while the courier is registered, not landed, and still owed fuel. Note the real answer is hidden from the player in the UI, but it is public on-chain.</p></div></details>
+  <details><summary><span class="sig">unitsOutstanding(matchId, courierId) → uint32</span><span class="who tag t-view">view</span></summary><div class="body"><p>Units still owed before the courier can finish. Zero means it can fly to the end.</p></div></details>
+  <details><summary><span class="sig">travelSecondsOf(matchId, courierId) → uint32</span><span class="who tag t-view">view</span></summary><div class="body"><p>Total seconds of travel paid for so far: <code>(unitsAtDispatch + unitsBoosted) × 5</code>.</p></div></details>
+  <details><summary><span class="sig">deriveRequiredUnits(matchId, courierId, keyIndex, nonce) → uint32</span><span class="who tag t-view">view</span></summary><div class="body">
+    <p>The fuel demand implied by a courier's secret preimage: <code>4 + keccak("FUEL", …) % 12</code>. Pure and public.</p>
+  </div></details>
+  <details><summary><span class="sig">fuelWasHonest(matchId, courierId, keyIndex, nonce) → bool</span><span class="who tag t-view">view</span></summary><div class="body">
+    <p>After a reveal, checks that the registered <code>requiredUnits</code> equals what the draw dictated. A server that billed more is caught here, the same way one that swapped the key is caught by <code>CommitRevealRegistry</code>.</p>
+<pre><code>const c = await registry.getCourier(matchId, courierId);
+const honest = await fuel.fuelWasHonest(matchId, courierId, c.keyIndex, c.nonce);</code></pre>
+  </div></details>
+  <details><summary><span class="sig">getCourier(matchId, courierId) → Courier</span><span class="who tag t-view">view</span></summary><div class="body"><p><code>owner</code>, <code>unitsAtDispatch</code>, <code>unitsBoosted</code>, <code>requiredUnits</code>, <code>boostCount</code>, <code>registered</code>, <code>landed</code>.</p></div></details>
+  <details><summary><span class="sig">bounty(matchId) / bountyPaid(matchId)</span><span class="who tag t-view">view</span></summary><div class="body"><p>ETH waiting for the winner, and whether it was already paid.</p></div></details>
+
+  <h3>Events</h3>
+  <table>
+    <tr><td><code>CourierRegistered(matchId, courierId, owner, unitsAtDispatch, requiredUnits)</code></td></tr>
+    <tr><td><code>CourierBoosted(matchId, courierId, payer, amount, unitsAdded, totalUnits, stillOwed)</code></td></tr>
+    <tr><td><code>CourierLanded(matchId, courierId)</code></td></tr>
+    <tr><td><code>BountyPaid(matchId, winner, amount)</code></td></tr>
+  </table>
+</section>
+
+<!-- ───────────────────────── INTEL TOKEN ───────────────────────── -->
+<section class="card" id="token">
+  <div class="head"><h2>IntelToken <small style="color:var(--dim)">(INTEL)</small></h2><span class="addr">0x5FbDB2315678afecb367f032d93F642f64180aa3</span></div>
+  <p>The in-game currency as a real ERC-20, built on OpenZeppelin, so it can be staked and shows up in MetaMask. Intel balances during a match stay off-chain (they change several times a second); this token is the <b>settlement layer</b>. It also has a rate-limited public faucet so every imported demo account can get tokens without the owner minting for each.</p>
+  <p>It exposes the standard ERC-20 interface (<code>transfer</code>, <code>approve</code>, <code>transferFrom</code>, <code>balanceOf</code>, <code>allowance</code>, <code>totalSupply</code>, 18 decimals) plus:</p>
+
+  <h3>Constants</h3>
+  <table>
+    <tr><td><code>FAUCET_AMOUNT</code></td><td>1,000 INTEL per claim</td></tr>
+    <tr><td><code>FAUCET_COOLDOWN</code></td><td>1 minute per address</td></tr>
+    <tr><td>Initial supply</td><td>1,000,000 INTEL minted to the owner (the game server)</td></tr>
+  </table>
+
+  <h3>Write methods</h3>
+  <details><summary><span class="sig">faucet()</span><span class="who tag t-any">anyone</span></summary><div class="body">
+    <p>Mints 1,000 INTEL to the caller. Reverts with <code>FaucetCooldown(availableAt)</code> if called again within a minute. The first call is always allowed.</p>
+<pre><code>await token.connect(player1).faucet();
+ethers.formatEther(await token.balanceOf(player1.address));   // "1000.0" (plus any earlier balance)
+await token.connect(player1).faucet();                         // reverts: FaucetCooldown</code></pre>
+  </div></details>
+  <details><summary><span class="sig">mint(to, amount)</span><span class="who tag t-owner">owner only</span></summary><div class="body">
+    <p>Owner mint, used by deployment scripts to seed accounts. The owner is the game server account.</p>
+<pre><code>await token.mint(player3.address, ethers.parseEther("5000"));</code></pre>
+  </div></details>
+
+  <h3>Read methods</h3>
+  <details><summary><span class="sig">faucetCooldownLeft(address) → uint256</span><span class="who tag t-view">view</span></summary><div class="body"><p>Seconds before this address can claim again, or 0 if it can claim now. The UI uses it to disable the button.</p></div></details>
+  <details><summary><span class="sig">lastFaucetAt(address) → uint256</span><span class="who tag t-view">view</span></summary><div class="body"><p>Timestamp of that address's last claim, or 0 if it never claimed.</p></div></details>
+
+  <h3>Events</h3>
+  <table><tr><td><code>FaucetClaimed(to, amount)</code> plus standard <code>Transfer</code> / <code>Approval</code></td></tr></table>
+</section>
+
+<!-- ───────────────────────── ESCROW ───────────────────────── -->
+<section class="card" id="escrow">
+  <div class="head"><h2>TournamentEscrow</h2><span class="addr">0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9</span></div>
+  <p>Players stake INTEL on a match and the winner takes the pot. This is where commit-reveal earns its keep: once value is at stake, "trust the server" isn't acceptable. If the server settles before <code>settleDeadline</code>, the winner is paid. If it stays <b>silent</b> past the deadline, every player reclaims their own stake and the server gains nothing, so refusing to settle is no longer a free way out of a match it was losing.</p>
+
+  <h3>States</h3>
+  <table>
+    <tr><td><code>0 None</code></td><td>Never created.</td></tr>
+    <tr><td><code>1 Open</code></td><td>Accepting stakes.</td></tr>
+    <tr><td><code>2 Locked</code></td><td>Match in progress, no more joins. A full table locks itself.</td></tr>
+    <tr><td><code>3 Settled</code></td><td>Winner paid.</td></tr>
+  </table>
+
+  <h3>Write methods</h3>
+  <details><summary><span class="sig">createTournament(matchId, stake, maxPlayers, joinWindowSeconds, settleWindowSeconds)</span><span class="who tag t-server">server</span></summary><div class="body">
+    <p>Opens a tournament. Needs a non-zero stake, 2 to 4 players and non-zero windows (<code>BadParameters</code>), and the match must be new (<code>AlreadyExists</code>). The settle deadline is the join deadline plus the settle window.</p>
+<pre><code>await escrow.createTournament(
+  matchId,
+  ethers.parseEther("100"),   // 100 INTEL each
+  4,                          // up to 4 players
+  120,                        // 2 min to join
+  1800                        // then 30 min for the server to settle
+);</code></pre>
+  </div></details>
+
+  <details><summary><span class="sig">join(matchId)</span><span class="who tag t-player">player</span></summary><div class="body">
+    <p>Stakes and takes a seat. The caller must <b>approve the escrow first</b> (the standard two-step ERC-20 flow, which is why MetaMask prompts twice). Errors: <code>WrongState</code>, <code>JoinClosed</code>, <code>AlreadyJoined</code>, <code>TournamentFull</code>. The last seat auto-locks the tournament.</p>
+<pre><code>const stake = ethers.parseEther("100");
+await token.connect(player1).approve(escrowAddress, stake);   // step 1
+await escrow.connect(player1).join(matchId);                  // step 2 — pulls 100 INTEL</code></pre>
+  </div></details>
+
+  <details><summary><span class="sig">lock(matchId)</span><span class="who tag t-server">server</span></summary><div class="body">
+    <p>Closes joins early, for example when a 3-player match starts at a 4-seat table. Needs at least 2 players.</p>
+<pre><code>await escrow.lock(matchId);</code></pre>
+  </div></details>
+
+  <details><summary><span class="sig">settle(matchId, winner)</span><span class="who tag t-server">server</span></summary><div class="body">
+    <p>Pays the whole pot to the winner, who must have joined (<code>WinnerNotPlaying</code>). Only valid while <code>Locked</code> and before the settle deadline (<code>SettleWindowClosed</code>); after that the players' refund right takes precedence.</p>
+<pre><code>await escrow.settle(matchId, winnerAddress);   // 4 players × 100 = 400 INTEL to the winner</code></pre>
+  </div></details>
+
+  <details><summary><span class="sig">claimRefund(matchId)</span><span class="who tag t-player">player</span></summary><div class="body">
+    <p>If the server never settled, each player takes back their own stake. Only after the settle deadline (<code>SettleWindowOpen</code> before that), only for players who joined (<code>NotAPlayer</code>), and once each (<code>AlreadyRefunded</code>).</p>
+<pre><code>if (await escrow.refundAvailable(matchId)) {
+  await escrow.connect(player2).claimRefund(matchId);   // gets exactly their 100 back
+}</code></pre>
+  </div></details>
+
+  <h3>Read methods</h3>
+  <details><summary><span class="sig">getTournament(matchId) → Tournament</span><span class="who tag t-view">view</span></summary><div class="body"><p><code>stake</code>, <code>pot</code>, <code>maxPlayers</code>, <code>playerCount</code>, <code>joinDeadline</code>, <code>settleDeadline</code>, <code>winner</code>, <code>state</code>.</p></div></details>
+  <details><summary><span class="sig">getPlayers(matchId) → address[]</span><span class="who tag t-view">view</span></summary><div class="body"><p>Everyone who staked, in join order.</p></div></details>
+  <details><summary><span class="sig">refundAvailable(matchId) → bool</span><span class="who tag t-view">view</span></summary><div class="body"><p>True once the settle deadline has passed on a tournament that isn't settled.</p></div></details>
+  <details><summary><span class="sig">hasJoined(matchId, address) / hasRefunded(matchId, address) → bool</span><span class="who tag t-view">view</span></summary><div class="body"><p>Per-player flags.</p></div></details>
+  <details><summary><span class="sig">token() / gameServer()</span><span class="who tag t-view">view</span></summary><div class="body"><p>The INTEL token address and the authorised server, both immutable.</p></div></details>
+
+  <h3>Events</h3>
+  <table>
+    <tr><td><code>TournamentCreated</code>, <code>PlayerJoined</code>, <code>TournamentLocked</code>, <code>TournamentSettled</code>, <code>StakeRefunded</code></td></tr>
+  </table>
+  <h3>How the game uses it</h3>
+  <ol>
+    <li><b>Lobby opens</b> — the server calls <code>createTournament</code> (4 seats, 30 min to join, 1 h to settle). The stake is <code>CHAIN_STAKE_INTEL</code> in <code>.env</code>, 100 INTEL by default.</li>
+    <li><b>Players stake</b> from the lobby's buy-in panel: <code>approve</code> then <code>join</code>. The server learns of it from the <code>PlayerJoined</code> event. Nobody can ready up without a stake, and the host can't start until every player in the lobby has staked.</li>
+    <li><b>Start</b> — the server calls <code>lock</code> (a full table of 4 has already locked itself).</li>
+    <li><b>Finish</b> — the server calls <code>settle</code> for the winner, who takes the whole pot. This is also how a forfeit works: the forfeiter's stake stays in the pot and goes to whoever is left.</li>
+  </ol>
+  <div class="note">Leaving the lobby after staking does not return the stake, because the contract only refunds after the settle deadline. If the server never settles, <code>claimRefund</code> gives every player their own stake back after the deadline. The game server is trusted to name the right winner; the refund path is the safeguard if it stays silent.</div>
+</section>
+
+<!-- ───────────────────────── MATCH REGISTRY ───────────────────────── -->
+<section class="card" id="registry">
+  <div class="head"><h2>MatchRegistry</h2><span class="addr">0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0</span></div>
+  <p>Anchors finished matches so the leaderboard can't be rewritten. One write per match, not per action. It stores who won, how, and each player's score line, and it keeps career totals up to date as it goes so reads stay cheap.</p>
+
+  <h3><code>winType</code> codes</h3>
+  <table>
+    <tr><td><code>0</code></td><td>OPERATION — completed all steps</td></tr>
+    <tr><td><code>1</code></td><td>BLACKOUT — enough cracks to expose the network</td></tr>
+    <tr><td><code>2</code></td><td>TIMEOUT — led the board when time expired</td></tr>
+    <tr><td><code>3</code></td><td>FORFEIT — every rival forfeited (stored as a plain number, so no redeploy was needed)</td></tr>
+  </table>
+
+  <h3>Write methods</h3>
+  <details><summary><span class="sig">finalizeMatch(matchId, winnerSlot, winType, durationSeconds, results[])</span><span class="who tag t-server">server</span></summary><div class="body">
+    <p>Records the result once. Each <code>results</code> entry is <code>{ player, slot, directivesConfirmed, cracksMade, finalIntel }</code>. It increments <code>played</code> and <code>totalCracks</code> for every player and <code>wins</code> for the one in <code>winnerSlot</code>. Errors: <code>AlreadyFinalized</code>, <code>NoPlayers</code>, <code>WinnerNotPlaying</code>.</p>
+<pre><code>await matchRegistry.finalizeMatch(matchId, 0, 0, 412, [
+  { player: p1, slot: 0, directivesConfirmed: 5, cracksMade: 2, finalIntel: 640 },
+  { player: p2, slot: 1, directivesConfirmed: 3, cracksMade: 4, finalIntel: 310 },
+]);   // winner = slot 0 by OPERATION in 412 s
+
+await matchRegistry.finalizeMatch(matchId, 0, 0, 412, [...]);   // reverts: AlreadyFinalized</code></pre>
+  </div></details>
+
+  <h3>Read methods</h3>
+  <details><summary><span class="sig">getMatch(matchId) → Match</span><span class="who tag t-view">view</span></summary><div class="body"><p><code>matchId</code>, <code>winnerSlot</code>, <code>winType</code>, <code>finalizedAt</code>, <code>durationSeconds</code>, <code>exists</code>.</p>
+<pre><code>const m = await matchRegistry.getMatch(matchId);
+if (m.exists) console.log("winner slot", m.winnerSlot, "type", m.winType);</code></pre></div></details>
+  <details><summary><span class="sig">getResults(matchId) → PlayerResult[]</span><span class="who tag t-view">view</span></summary><div class="body"><p>Every player's score line for that match.</p></div></details>
+  <details><summary><span class="sig">matchCount() / matchAt(i)</span><span class="who tag t-view">view</span></summary><div class="body"><p>Enumerate every finalized match.</p>
+<pre><code>const n = await matchRegistry.matchCount();
+for (let i = 0n; i &lt; n; i++) console.log(await matchRegistry.matchAt(i));</code></pre></div></details>
+  <details><summary><span class="sig">wins(address) / played(address) / totalCracks(address) → uint32</span><span class="who tag t-view">view</span></summary><div class="body"><p>Career totals per wallet, derived on write.</p>
+<pre><code>const [w, p] = [await matchRegistry.wins(p1), await matchRegistry.played(p1)];
+console.log(`${w}/${p} wins`);</code></pre></div></details>
+
+  <h3>Events</h3>
+  <table><tr><td><code>MatchFinalized(matchId, winner, winnerSlot, winType, durationSeconds)</code></td></tr></table>
+</section>
+
+<!-- ───────────────────────── CONVENTIONS ───────────────────────── -->
+<section class="card" id="conventions">
+  <h2>Conventions and setup</h2>
+  <h3>Identifiers</h3>
+  <p><code>matchId</code> and <code>courierId</code> are <code>bytes32</code> values. The game derives the match id from the join code with <code>keccak256</code> of <code>"CIPHERWAR:&lt;CODE&gt;"</code>, and every contract mixes it into its storage keys so ids never collide across matches.</p>
+  <h3>Connecting</h3>
+<pre><code>const provider = new ethers.JsonRpcProvider("http://192.168.1.173:8545");   // chain id 31337
+const server   = new ethers.Wallet(SERVER_KEY, provider);                    // account #0
+const registry = new ethers.Contract(commitRevealAddress, abi, server);</code></pre>
+  <p>ABIs and addresses are written to <code>public/cipherchain-info.json</code> by <code>npx hardhat run scripts/deploy.js --network localhost</code>.</p>
+  <h3>Errors</h3>
+  <p>The contracts use custom errors (for example <code>BadCommitment</code>, <code>NotGameServer</code>) rather than revert strings. They are cheaper, and ethers decodes them by name when you pass the ABI.</p>
+  <h3>Caveats</h3>
+  <ul>
+    <li>These addresses are only valid for the current local deployment; restarting the Hardhat node wipes the chain and you must redeploy.</li>
+    <li>The contract proves the server did not change the key. It does not prove the initial draw was uniformly random; that would need player-contributed randomness or a VRF.</li>
+    <li>The server account uses Hardhat's public test key. Treat everything here as a demo, not for real funds.</li>
+  </ul>
+</section>
+
+</div>
+</body>
+</html>
